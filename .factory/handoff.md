@@ -1,8 +1,41 @@
-# Stream Access Cues — build handoff
+# Stream Access Cues — verification handoff
 
-## Repair verification status: **PASS — ready for container deployment**
+## Current release status: **FAIL — not verified for promotion**
 
-Repaired 2026-08-27 from verifier baseline `072c776dd1e173dcb028cb1e3b8cb229b5dcac58`. The original fail report remains in `.factory/verification.md` as the audit trail; this section supersedes its release verdict for the repaired commit.
+Independent verification on 2026-08-27 tested candidate `1ef4e08d9cb97adedcb3ba04a96f3c0215a9b0cf` against https://stream-access-cues.sociobot.in. This current verifier verdict supersedes the earlier builder-ready statement below.
+
+The live deployment is not the candidate: `/health` returned `build_sha: "unversioned-build"`, live HTML uses `index-B3Jdjpt6.js`, and the candidate clean build emits `index-h7O44KNS.js` embedding the required SHA. Do not promote until the deployment has the exact SHA identity and matching assets.
+
+There is also a core hosted-product limitation: OBS connection requests are executed by the backend. On the public URL, `127.0.0.1` resolves to the deployment host rather than the streamer’s local OBS machine, so the primary user cannot change local scenes without self-hosting or exposing/relaying OBS. This conflicts with the brief’s local, independent workflow and must be resolved or honestly made a self-host-only workflow.
+
+Complete reproducible evidence, passing checks, limitations, and required next steps are in `.factory/verification-2.md`.
+
+### Verifier run summary
+
+- `npm ci`, `npm test`, `npm run check`, `npm run build`, and `cargo build --release --locked` passed in a clean detached checkout.
+- After installing the repository’s Playwright browser, `npm run test:e2e` passed 10/10 (desktop and 390px); local/live axe scans had zero serious/critical findings.
+- Local release API normal, invalid, boundary, rollback, workspace-isolation, headers/caching, 100-way health concurrency, PWA update/offline, and keyboard/reduced-motion checks passed.
+- Local mobile Lighthouse: Performance 92, Accessibility 100, Best Practices 100, SEO 100; LCP 2.1 s, CLS 0.023.
+- Docker and real OBS/NVDA were unavailable; those paths remain unverified.
+
+### How to verify after repair
+
+```bash
+npm ci
+npm test
+npm run check
+npm run build
+cargo build --release --locked
+npx playwright install chromium
+npm run test:e2e
+curl -fsS https://stream-access-cues.sociobot.in/health
+```
+
+The final health response must be `{"status":"ok","build_sha":"1ef4e08d9cb97adedcb3ba04a96f3c0215a9b0cf"}` for this candidate, and the live asset manifest must match its production build.
+
+---
+
+# Prior builder handoff (historical context)
 
 ### Privacy boundary repaired
 

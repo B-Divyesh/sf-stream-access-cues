@@ -36,6 +36,7 @@ Other configuration:
 | `DIST_DIR` | `dist` | Built frontend directory |
 | `RUST_LOG` | service info logs | Structured log filter |
 | `BUILD_SHA` | checked-out Git SHA | Immutable value returned by `/health` |
+| `DEPLOYMENT_MODE` | `local` outside Docker; `hosted` in the image | `local` is the only mode allowed to save OBS credentials or open OBS WebSocket connections. |
 
 ## Test and check
 
@@ -51,10 +52,12 @@ The test command runs frontend unit tests and Rust tests. The check command runs
 
 ```bash
 docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t stream-access-cues .
-docker run --rm -p 8080:8080 -v stream-access-cues-data:/app/data stream-access-cues
+docker run --rm -p 8080:8080 -v stream-access-cues-data:/app/data -e DEPLOYMENT_MODE=local stream-access-cues
 ```
 
-Open `http://localhost:8080`. When OBS runs on the Docker host, use `host.docker.internal` on Docker Desktop. On Linux, add `--add-host=host.docker.internal:host-gateway` or use a host network appropriate to your environment.
+Open `http://localhost:8080`. This explicit local mode is the supported way to control OBS: it runs the service beside the operator’s OBS instance and keeps its OBS password in the local volume. When OBS runs on the Docker host, use `host.docker.internal` on Docker Desktop. On Linux, add `--add-host=host.docker.internal:host-gateway` or use a host network appropriate to your environment.
+
+The image defaults to `DEPLOYMENT_MODE=hosted` for the public factory deployment. Hosted mode is an accessible setup guide only: it refuses OBS credential writes and all OBS network requests, because `127.0.0.1` on a public container is not the streamer’s computer. It still offers the independently isolated checklist and launch-link workspace, but it cannot change scenes. Never expose the OBS WebSocket publicly.
 
 ## Keyboard map
 
@@ -67,7 +70,7 @@ Open `http://localhost:8080`. When OBS runs on the Docker host, use `host.docker
 
 ## Privacy and deployment
 
-When self-hosted, the service and SQLite data remain on the operator’s machine. On the public service, mutable data is isolated behind the browser-local private workspace key described above; it is never shared between visitors and the raw key is never persisted by the server. The browser also stores the timer and a release-versioned offline shell cache. See `/privacy` and `/terms` in the running app. The factory owns deployment, DNS, and infrastructure; this repository contains no deployment credentials.
+When self-hosted, the service and SQLite data remain on the operator’s machine. The public setup guide never accepts OBS credentials or contacts an OBS endpoint. Its optional checklist and links are isolated behind the browser-local private workspace key described above; they are never shared between visitors and the raw key is never persisted by the server. The browser also stores the timer and a release-versioned offline shell cache. See `/privacy` and `/terms` in the running app. The factory owns deployment, DNS, and infrastructure; this repository contains no deployment credentials.
 
 ## License
 

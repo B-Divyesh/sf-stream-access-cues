@@ -3,6 +3,7 @@ export type ChecklistItem = { id: string; text: string; done: boolean };
 export type Cue = { id: string; label: string; scene_name: string };
 export type PlatformLink = { id: string; label: string; url: string };
 export type ObsStatus = { connected: boolean; message: string; scenes: string[]; current_scene: string | null };
+export type Runtime = { build_sha: string; deployment_mode: 'local' | 'hosted'; obs_control_available: boolean };
 
 export class ApiFailure extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -40,6 +41,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  runtime: () => request<Runtime>('/runtime'),
   settings: () => request<Settings>('/settings'),
   saveSettings: (value: { obs_host: string; obs_port: number; obs_password?: string }) => request<Settings>('/settings', { method: 'PUT', body: JSON.stringify(value) }),
   checklist: () => request<ChecklistItem[]>('/checklist'),

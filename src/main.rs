@@ -21,9 +21,42 @@ use tracing::{info, warn};
 const OPERATOR_HEADER: &str = "x-operator-key";
 const BUILD_SHA: &str = env!("BUILD_SHA");
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeploymentMode {
+    /// The operator runs the service on the same machine (or trusted LAN) as OBS.
+    Local,
+    /// The factory's public guidance surface. It must never make network requests to OBS.
+    Hosted,
+}
+
+impl DeploymentMode {
+    fn from_env() -> Self {
+        match env::var("DEPLOYMENT_MODE").as_deref() {
+            Ok("hosted") => Self::Hosted,
+            Ok("local") | Err(_) => Self::Local,
+            Ok(value) => {
+                warn!(deployment_mode = value, "unknown deployment mode; using local mode");
+                Self::Local
+            }
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Hosted => "hosted",
+        }
+    }
+
+    fn allows_obs_control(self) -> bool {
+        self == Self::Local
+    }
+}
+
 struct AppState {
     db: SqlitePool,
     initialization_lock: tokio::sync::Mutex<()>,
+    deployment_mode: DeploymentMode,
 }
 
 type SharedState = Arc<AppState>;
@@ -86,6 +119,13 @@ where
 struct HealthResponse<'a> {
     status: &'a str,
     build_sha: &'a str,
+}
+
+#[derive(Serialize)]
+struct RuntimeResponse<'a> {
+    build_sha: &'a str,
+    deployment_mode: &'a str,
+    obs_control_available: bool,
 }
 
 #[derive(Serialize)]
@@ -157,12 +197,21 @@ async fn main() {
         .await
         .expect("connect sqlite");
     migrate(&db).await.expect("run database migrations");
+    let deployment_mode = DeploymentMode::from_env();
+    if deployment_mode == DeploymentMode::Hosted {
+        // A previously public deployment may contain an old private-workspace setting.
+        // Do not retain a credential or an enabled connection in a public container.
+        disable_hosted_obs_settings(&db)
+            .await
+            .expect("disable hosted OBS settings");
+    }
 
     let dist_dir = env::var("DIST_DIR").unwrap_or_else(|_| "dist".into());
     let app = app_router(
         Arc::new(AppState {
             db,
             initialization_lock: tokio::sync::Mutex::new(()),
+            deployment_mode,
         }),
         dist_dir,
     );
@@ -174,7 +223,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind server");
-    info!(%addr, build_sha = BUILD_SHA, "stream access cues listening");
+    info!(%addr, build_sha = BUILD_SHA, deployment_mode = deployment_mode.name(), "stream access cues listening");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
@@ -210,6 +259,7 @@ fn app_router(state: SharedState, dist_dir: String) -> Router {
 
 fn api_router() -> Router<SharedState> {
     Router::new()
+        .route("/runtime", get(runtime))
         .route("/settings", get(get_settings).put(put_settings))
         .route("/checklist", get(get_checklist).put(put_checklist))
         .route("/cues", get(get_cues).put(put_cues))
@@ -287,6 +337,13 @@ async fn migrate(db: &SqlitePool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+async fn disable_hosted_obs_settings(db: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE operator_settings SET obs_host = '127.0.0.1', obs_port = 4455, obs_password = '', configured = 0")
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 async fn ensure_operator(state: &AppState, operator_id: &str) -> Result<(), ApiError> {
     // The first dashboard load asks four routes in parallel. Serialize only the tiny
     // first-workspace seed transaction so SQLite cannot race its starter rows.
@@ -361,10 +418,26 @@ async fn health() -> Json<HealthResponse<'static>> {
     })
 }
 
+async fn runtime(State(state): State<SharedState>) -> Json<RuntimeResponse<'static>> {
+    Json(RuntimeResponse {
+        build_sha: BUILD_SHA,
+        deployment_mode: state.deployment_mode.name(),
+        obs_control_available: state.deployment_mode.allows_obs_control(),
+    })
+}
+
 async fn get_settings(
     State(state): State<SharedState>,
     operator: Operator,
 ) -> Result<Json<SettingsResponse>, ApiError> {
+    if !state.deployment_mode.allows_obs_control() {
+        return Ok(Json(SettingsResponse {
+            obs_host: "127.0.0.1".into(),
+            obs_port: 4455,
+            configured: false,
+            password_saved: false,
+        }));
+    }
     ensure_operator(&state, &operator.0).await?;
     settings_response(&state.db, &operator.0).await
 }
@@ -390,6 +463,7 @@ async fn put_settings(
     operator: Operator,
     Json(input): Json<SettingsInput>,
 ) -> Result<Json<SettingsResponse>, ApiError> {
+    require_local_obs(&state)?;
     validate_host(&input.obs_host)?;
     if input.obs_port == 0 {
         return Err(ApiError(
@@ -429,6 +503,16 @@ fn validate_host(host: &str) -> Result<(), ApiError> {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,
             "Enter a host name only, such as 127.0.0.1 or host.docker.internal.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn require_local_obs(state: &AppState) -> Result<(), ApiError> {
+    if !state.deployment_mode.allows_obs_control() {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "OBS control is available only from the local Stream Access Cues service. Run the local container on the computer where OBS is running; this hosted site never connects to your OBS WebSocket.".into(),
         ));
     }
     Ok(())
@@ -664,6 +748,7 @@ fn validate_unique_ids<'a>(
 }
 
 async fn obs_client(state: &AppState, operator_id: &str) -> Result<obws::Client, ApiError> {
+    require_local_obs(state)?;
     ensure_operator(state, operator_id).await?;
     let db = &state.db;
     let row = sqlx::query("SELECT obs_host, obs_port, obs_password, configured FROM operator_settings WHERE operator_id = ?")
@@ -739,6 +824,10 @@ mod tests {
     use tower::ServiceExt;
 
     async fn test_state() -> SharedState {
+        test_state_for(DeploymentMode::Local).await
+    }
+
+    async fn test_state_for(deployment_mode: DeploymentMode) -> SharedState {
         let db = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -748,6 +837,7 @@ mod tests {
         Arc::new(AppState {
             db,
             initialization_lock: tokio::sync::Mutex::new(()),
+            deployment_mode,
         })
     }
 
@@ -891,5 +981,65 @@ mod tests {
         assert_eq!(response.status, "ok");
         assert_ne!(response.build_sha, "development");
         assert_ne!(response.build_sha, "unversioned-build");
+    }
+
+    #[tokio::test]
+    async fn hosted_mode_never_stores_or_connects_obs_credentials() {
+        let state = test_state_for(DeploymentMode::Hosted).await;
+        let app = api_router().with_state(state);
+        let key = "h".repeat(43);
+
+        let runtime_response = app
+            .clone()
+            .oneshot(request("GET", "/runtime", None, ""))
+            .await
+            .expect("runtime response");
+        assert_eq!(runtime_response.status(), StatusCode::OK);
+        let runtime_body = to_bytes(runtime_response.into_body(), 1024 * 1024)
+            .await
+            .expect("runtime body");
+        let runtime: serde_json::Value = serde_json::from_slice(&runtime_body).expect("runtime json");
+        assert_eq!(runtime["deployment_mode"], "hosted");
+        assert_eq!(runtime["obs_control_available"], false);
+
+        for (method, path, body) in [
+            (
+                "PUT",
+                "/settings",
+                r#"{"obs_host":"127.0.0.1","obs_port":4455,"obs_password":"never-save-this"}"#,
+            ),
+            ("GET", "/obs/status", ""),
+            ("POST", "/obs/scene", r#"{"scene_name":"Live"}"#),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(request(method, path, Some(&key), body))
+                .await
+                .expect("hosted response");
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+            let text = String::from_utf8(
+                to_bytes(response.into_body(), 1024 * 1024)
+                    .await
+                    .expect("error body")
+                    .to_vec(),
+            )
+            .expect("utf8");
+            assert!(text.contains("local Stream Access Cues service"));
+        }
+
+        let response = app
+            .oneshot(request("GET", "/settings", Some(&key), ""))
+            .await
+            .expect("settings response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let text = String::from_utf8(
+            to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("settings body")
+                .to_vec(),
+        )
+        .expect("utf8");
+        assert!(text.contains("\"configured\":false"));
+        assert!(!text.contains("never-save-this"));
     }
 }

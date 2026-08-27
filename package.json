@@ -10,7 +10,7 @@
     "build": "vite build",
     "build:server": "cargo build --release",
     "test": "vitest run && cargo test",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test && playwright test --config=playwright.hosted.config.ts",
     "check": "svelte-check --tsconfig ./tsconfig.json && cargo clippy --all-targets -- -D warnings"
   },
   "dependencies": {
@@ -20,10 +20,10 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
-    "@playwright/test": "^1.55.1",
-    "@types/node": "^22.15.30",
+    "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/svelte": "^5.2.8",
+    "@types/node": "^22.15.30",
     "concurrently": "^9.1.2",
     "jsdom": "^26.1.0",
     "svelte-check": "^4.2.1",

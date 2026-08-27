@@ -131,6 +131,10 @@ dialog form { padding: 24px; }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .close-button { width: 48px; padding: 0; border-color: transparent; border-bottom-color: transparent; background: transparent; font-size: 30px; }
 dialog form > p { color: var(--muted); }
+.setup-steps { margin: 18px 0 10px; padding-left: 24px; color: var(--muted); }
+.setup-steps li + li { margin-top: 10px; }
+dialog pre { overflow-x: auto; margin: 12px 0; padding: 14px; border: 1px solid var(--rule); color: var(--paper); background: var(--well); font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+dialog code, .legal-page code { overflow-wrap: anywhere; }
 dialog label { display: block; margin: 18px 0 6px; font-weight: 800; }
 dialog label span { color: var(--muted); font-weight: 400; }
 dialog input:not([type="checkbox"]) { width: 100%; padding: 10px 12px; border: 1px solid #969c87; border-radius: 2px; color: var(--paper); background: var(--well); }

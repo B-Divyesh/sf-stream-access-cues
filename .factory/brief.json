@@ -1,0 +1,11 @@
+{
+  "slug": "stream-access-cues",
+  "title": "Stream Access Cues",
+  "territory": "games-creative",
+  "user": "A blind or keyboard-first independent streamer who needs a reliable local cue surface for stream metadata, scenes, and timing without inaccessible embedded web controls.",
+  "smallest_useful_product": "Keyboard-first local web dashboard using OBS WebSocket for named scene/cue actions, an editable spoken checklist, and launch links to platform metadata pages.",
+  "success_measure": "A blind keyboard-only tester completes a pre-stream checklist and changes an OBS scene without sighted assistance; 90% of controls have clear screen-reader names and documented shortcuts.",
+  "artifact_class": "web-with-backend",
+  "monetization": "free",
+  "constraints": "Do not promise Twitch metadata writes unless the current authorized API supports them; keep OBS credentials local, meet WCAG keyboard/name requirements, and test with NVDA."
+}

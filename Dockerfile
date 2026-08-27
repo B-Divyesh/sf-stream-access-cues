@@ -1,5 +1,7 @@
 FROM node:22-bookworm-slim AS web
 WORKDIR /app
+ARG BUILD_SHA=unversioned-build
+ENV BUILD_SHA=$BUILD_SHA
 COPY package.json package-lock.json vite.config.ts tsconfig.json svelte.config.js ./
 COPY frontend ./frontend
 RUN npm ci && npm run build
@@ -9,6 +11,7 @@ WORKDIR /app
 ARG BUILD_SHA=development
 ENV BUILD_SHA=$BUILD_SHA
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./
 COPY src ./src
 RUN cargo build --release --locked
 

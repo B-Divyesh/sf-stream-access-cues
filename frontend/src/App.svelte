@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { api, ApiFailure, type ChecklistItem, type Cue, type ObsStatus, type PlatformLink, type Settings } from './api';
+  import { api, ApiFailure, operatorKey, type ChecklistItem, type Cue, type ObsStatus, type PlatformLink, type Settings } from './api';
   import { formatDuration, isEditableTarget, makeId, timerMilliseconds, type TimerState } from './utils';
 
   const path = window.location.pathname.replace(/\/$/, '') || '/';
@@ -20,6 +20,7 @@
   let now = Date.now();
   let timer: TimerState = { elapsed: 0, startedAt: null, running: false };
   let timerText = '00:00:00';
+  const timerStorageKey = `stream-access-cues.timer.${operatorKey()}`;
 
   let settingsDialog: HTMLDialogElement;
   let checklistDialog: HTMLDialogElement;
@@ -140,7 +141,7 @@
   }
 
   function persistTimer() {
-    localStorage.setItem('stream-access-cues.timer', JSON.stringify(timer));
+    localStorage.setItem(timerStorageKey, JSON.stringify(timer));
   }
 
   async function focusNextItem() {
@@ -168,7 +169,7 @@
         ...(settingsPassword || clearPassword ? { obs_password: clearPassword ? '' : settingsPassword } : {})
       });
       settingsDialog.close();
-      say('OBS connection settings saved locally. Testing the connection.');
+      say('OBS connection settings saved in this private workspace. Testing the connection.');
       await refreshObs();
     } catch (error) {
       settingsError = errorMessage(error);
@@ -246,9 +247,9 @@
   onMount(() => {
     if (!staticPage) loadAll(); else loading = false;
     try {
-      const stored = localStorage.getItem('stream-access-cues.timer');
+      const stored = localStorage.getItem(timerStorageKey);
       if (stored) timer = JSON.parse(stored) as TimerState;
-    } catch { localStorage.removeItem('stream-access-cues.timer'); }
+    } catch { localStorage.removeItem(timerStorageKey); }
     const interval = window.setInterval(() => { now = Date.now(); }, 500);
     const onOnline = () => { online = true; say('Browser is online.'); };
     const onOffline = () => { online = false; say('Browser is offline. Local controls remain available; external metadata pages will not open.'); };
@@ -290,13 +291,13 @@
     <article class="legal-page">
       <p class="eyebrow">Plain-language policy</p>
       <h1>Privacy</h1>
-      <p class="lede">Stream Access Cues is local-first. It has no accounts, analytics, advertising, tracking pixels, or third-party scripts.</p>
+      <p class="lede">Stream Access Cues is local-first: it has no accounts, analytics, advertising, tracking pixels, or third-party scripts.</p>
       <h2>What is stored</h2>
-      <p>The local service stores your OBS host, port and WebSocket password, checklist, scene cue names, and metadata links in its SQLite data directory. The browser stores only the session timer and an offline copy of the app shell.</p>
+      <p>Your workspace stores an OBS host, port and optional WebSocket password, checklist, scene cue names, and metadata links. The browser keeps a random private workspace key and its session timer; the service stores only a hash of that key, never the key itself.</p>
       <h2>Where it goes</h2>
-      <p>Your saved data is not sent to Sociobot or any hosted service. OBS credentials are used only by your running local service to connect to the OBS host you configure. Opening a metadata link takes you to that platform under its privacy policy.</p>
+      <p>When you run Stream Access Cues yourself, saved data stays in its local SQLite directory. On the public service, saved workspace values are sent only to this service and are isolated by your browser-local private key; another visitor cannot read or replace them. No data is sent to analytics, advertising, or third-party services. OBS credentials are used only for the OBS connection you configure. Opening a metadata link takes you to that platform under its privacy policy.</p>
       <h2>Remove your data</h2>
-      <p>Edit or remove checklist, cue, and link entries in the app. To remove all data, stop the service and delete its configured <code>DATA_DIR</code>. Clear site data in your browser to remove the timer and offline shell.</p>
+      <p>Edit or remove checklist, cue, and link entries in the app. To remove self-hosted data, stop the service and delete its configured <code>DATA_DIR</code>. Clearing site data removes your browser’s workspace key, timer, and offline shell; because that key cannot be recovered, do this only when you intend to start a new workspace.</p>
       <p>Effective 27 August 2026.</p>
     </article>
   {:else if staticPage === 'terms'}
@@ -330,7 +331,7 @@
 
     {#if serviceError}
       <section class="error-strip" role="alert">
-        <div><strong>Local service unavailable</strong><p>{serviceError}</p></div>
+        <div><strong>Private cue service unavailable</strong><p>{serviceError}</p></div>
         <button type="button" onclick={loadAll}>Retry connection</button>
       </section>
     {/if}
@@ -342,7 +343,7 @@
 
     {#if loading}
       <section class="loading-panel" aria-busy="true" aria-label="Loading saved cue surface">
-        <span class="meter" aria-hidden="true"></span><p>Warming up the local control surface…</p>
+        <span class="meter" aria-hidden="true"></span><p>Warming up your private control surface…</p>
       </section>
     {:else}
       {#if !settings.configured}
@@ -352,7 +353,7 @@
             <h2 id="onboarding-title">Connect the controls you already use.</h2>
             <p>Enable the WebSocket server in OBS under <strong>Tools → WebSocket Server Settings</strong>. Then save the local host, port, and optional password here.</p>
             <button class="primary-button" type="button" onclick={openSettings}>Configure OBS connection</button>
-            <p class="privacy-note">Your password stays in this service’s local SQLite file. It is never sent to our servers.</p>
+            <p class="privacy-note">Your saved controls belong to this browser’s private workspace key. Other visitors cannot read or replace them.</p>
           </div>
           <picture>
             <source media="(max-width: 700px)" srcset="/assets/control-panel-hero-768.webp" />

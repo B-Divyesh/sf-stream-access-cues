@@ -21,6 +21,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
     "@playwright/test": "^1.55.1",
+    "@types/node": "^22.15.30",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/svelte": "^5.2.8",
     "concurrently": "^9.1.2",

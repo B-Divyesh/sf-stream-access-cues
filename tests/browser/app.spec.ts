@@ -32,6 +32,36 @@ test('checklist changes persist through the local service', async ({ page }) => 
   await expect(page.getByRole('checkbox', { name: 'Set stream title and category' })).toBeChecked({ checked: !before });
 });
 
+test('private workspace data cannot be read or replaced by a separate browser context', async ({ browser }) => {
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  const firstPage = await first.newPage();
+  const secondPage = await second.newPage();
+  await firstPage.goto('/');
+  await secondPage.goto('/');
+
+  const saved = await firstPage.evaluate(async () => {
+    const key = localStorage.getItem('stream-access-cues.operator-key')!;
+    const response = await fetch('/api/checklist', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Operator-Key': key },
+      body: JSON.stringify([{ id: 'operator-one-only', text: 'Private first workspace item', done: true }])
+    });
+    return response.status;
+  });
+  expect(saved).toBe(200);
+
+  const secondItems = await secondPage.evaluate(async () => {
+    const key = localStorage.getItem('stream-access-cues.operator-key')!;
+    const response = await fetch('/api/checklist', { headers: { 'X-Operator-Key': key } });
+    return response.json() as Promise<Array<{ id: string }>>;
+  });
+  expect(secondItems.map((item) => item.id)).not.toContain('operator-one-only');
+
+  await first.close();
+  await second.close();
+});
+
 test('390px layout does not scroll sideways', async ({ page }) => {
   await page.goto('/');
   const widths = await page.evaluate(() => ({ body: document.body.scrollWidth, viewport: document.documentElement.clientWidth }));

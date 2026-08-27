@@ -1,4 +1,5 @@
-const CACHE = 'stream-access-cues-v1';
+const release = new URL(self.location.href).searchParams.get('build') || 'unversioned-build';
+const CACHE = `stream-access-cues-${release}`;
 const SHELL = ['/', '/index.html', '/icon.svg', '/manifest.webmanifest'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -8,15 +8,29 @@ export class ApiFailure extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
+const workspaceKeyName = 'stream-access-cues.operator-key';
+
+export function operatorKey(): string {
+  const existing = localStorage.getItem(workspaceKeyName);
+  if (existing && /^[A-Za-z0-9_-]{43}$/.test(existing)) return existing;
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const key = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  localStorage.setItem(workspaceKeyName, key);
+  return key;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
       ...options,
-      headers: { 'Content-Type': 'application/json', ...options?.headers }
+      headers: { 'Content-Type': 'application/json', 'X-Operator-Key': operatorKey(), ...options?.headers }
     });
   } catch {
-    throw new ApiFailure('The local service is unavailable. Start the Stream Access Cues server, then retry.', 0);
+    throw new ApiFailure('The private cue service is unavailable. Start Stream Access Cues, then retry.', 0);
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { error?: string };

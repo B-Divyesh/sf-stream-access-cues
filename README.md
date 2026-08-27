@@ -25,7 +25,9 @@ npm run dev
 
 The Vite UI runs at `http://localhost:5173` and proxies local API requests to the Rust service on port 8080. `npm run build` reproducibly writes the static frontend to `dist/`, with `dist/index.html` at its root.
 
-The service stores its SQLite database under `./data` by default. Change that with `DATA_DIR`. Other configuration:
+The service stores its SQLite database under `./data` by default. Change that with `DATA_DIR`. Each browser creates a random 256-bit workspace key in its own local storage. The API stores only the SHA-256 digest of that key and uses it to scope settings, cues, checklist items, links, and OBS actions. A request without that key is rejected; another browser cannot read or overwrite the workspace.
+
+Other configuration:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -33,7 +35,7 @@ The service stores its SQLite database under `./data` by default. Change that wi
 | `DATA_DIR` | `data` | SQLite persistence directory |
 | `DIST_DIR` | `dist` | Built frontend directory |
 | `RUST_LOG` | service info logs | Structured log filter |
-| `BUILD_SHA` | `development` | Value returned by `/health` |
+| `BUILD_SHA` | checked-out Git SHA | Immutable value returned by `/health` |
 
 ## Test and check
 
@@ -65,7 +67,7 @@ Open `http://localhost:8080`. When OBS runs on the Docker host, use `host.docker
 
 ## Privacy and deployment
 
-OBS credentials, cues, checklist, and links stay in the local SQLite file. The browser stores only the timer and an offline shell cache. See `/privacy` and `/terms` in the running app. The factory owns deployment, DNS, and infrastructure; this repository contains no deployment credentials.
+When self-hosted, the service and SQLite data remain on the operator’s machine. On the public service, mutable data is isolated behind the browser-local private workspace key described above; it is never shared between visitors and the raw key is never persisted by the server. The browser also stores the timer and a release-versioned offline shell cache. See `/privacy` and `/terms` in the running app. The factory owns deployment, DNS, and infrastructure; this repository contains no deployment credentials.
 
 ## License
 

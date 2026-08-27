@@ -34,7 +34,10 @@ impl IntoResponse for ApiError {
 impl From<sqlx::Error> for ApiError {
     fn from(error: sqlx::Error) -> Self {
         warn!(%error, "database request failed");
-        Self(StatusCode::INTERNAL_SERVER_ERROR, "The local database could not complete that request.".into())
+        Self(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The local database could not complete that request.".into(),
+        )
     }
 }
 
@@ -97,14 +100,21 @@ struct SceneInput {
 async fn main() {
     tracing_subscriber::fmt()
         .json()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("stream_access_cues=info".parse().expect("valid log filter")))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("stream_access_cues=info".parse().expect("valid log filter")),
+        )
         .init();
 
     let data_dir = PathBuf::from(env::var("DATA_DIR").unwrap_or_else(|_| "data".into()));
     std::fs::create_dir_all(&data_dir).expect("create data directory");
     let db_path = data_dir.join("stream-access-cues.sqlite");
     let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let db = SqlitePoolOptions::new().max_connections(5).connect(&database_url).await.expect("connect sqlite");
+    let db = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .expect("connect sqlite");
     migrate(&db).await.expect("run database migrations");
     seed(&db).await.expect("seed local defaults");
 
@@ -132,18 +142,33 @@ async fn main() {
         .layer(SetResponseHeaderLayer::if_not_present(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'self'; connect-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")))
         .layer(TraceLayer::new_for_http());
 
-    let port: u16 = env::var("PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(8080);
+    let port: u16 = env::var("PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind server");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind server");
     info!(%addr, "stream access cues listening");
-    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await.expect("serve application");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("serve application");
 }
 
 async fn shutdown_signal() {
-    let ctrl_c = async { tokio::signal::ctrl_c().await.expect("install Ctrl+C handler") };
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("install Ctrl+C handler")
+    };
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("install signal handler").recv().await;
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("install signal handler")
+            .recv()
+            .await;
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
@@ -162,114 +187,276 @@ async fn migrate(db: &SqlitePool) -> Result<(), sqlx::Error> {
 }
 
 async fn seed(db: &SqlitePool) -> Result<(), sqlx::Error> {
-    let checklist_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM checklist").fetch_one(db).await?;
+    let checklist_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM checklist")
+        .fetch_one(db)
+        .await?;
     if checklist_count == 0 {
-        for (position, text) in ["Set stream title and category", "Check microphone level", "Confirm recording path", "Test scene cues", "Start broadcast"].iter().enumerate() {
+        for (position, text) in [
+            "Set stream title and category",
+            "Check microphone level",
+            "Confirm recording path",
+            "Test scene cues",
+            "Start broadcast",
+        ]
+        .iter()
+        .enumerate()
+        {
             sqlx::query("INSERT INTO checklist (id, position, text, done) VALUES (?, ?, ?, 0)")
-                .bind(format!("starter-{}", position + 1)).bind(position as i64).bind(text).execute(db).await?;
+                .bind(format!("starter-{}", position + 1))
+                .bind(position as i64)
+                .bind(text)
+                .execute(db)
+                .await?;
         }
     }
-    let link_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM platform_links").fetch_one(db).await?;
+    let link_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM platform_links")
+        .fetch_one(db)
+        .await?;
     if link_count == 0 {
         for (position, (id, label, url)) in [
-            ("twitch", "Open Twitch dashboard", "https://dashboard.twitch.tv/"),
-            ("youtube", "Open YouTube Studio", "https://studio.youtube.com/"),
-        ].iter().enumerate() {
-            sqlx::query("INSERT INTO platform_links (id, position, label, url) VALUES (?, ?, ?, ?)")
-                .bind(id).bind(position as i64).bind(label).bind(url).execute(db).await?;
+            (
+                "twitch",
+                "Open Twitch dashboard",
+                "https://dashboard.twitch.tv/",
+            ),
+            (
+                "youtube",
+                "Open YouTube Studio",
+                "https://studio.youtube.com/",
+            ),
+        ]
+        .iter()
+        .enumerate()
+        {
+            sqlx::query(
+                "INSERT INTO platform_links (id, position, label, url) VALUES (?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(position as i64)
+            .bind(label)
+            .bind(url)
+            .execute(db)
+            .await?;
         }
     }
     Ok(())
 }
 
 async fn health() -> Json<HealthResponse<'static>> {
-    Json(HealthResponse { status: "ok", build_sha: option_env!("BUILD_SHA").unwrap_or("development") })
+    Json(HealthResponse {
+        status: "ok",
+        build_sha: option_env!("BUILD_SHA").unwrap_or("development"),
+    })
 }
 
-async fn get_settings(State(state): State<SharedState>) -> Result<Json<SettingsResponse>, ApiError> {
-    let row = sqlx::query("SELECT obs_host, obs_port, obs_password, configured FROM settings WHERE id = 1").fetch_one(&state.db).await?;
+async fn get_settings(
+    State(state): State<SharedState>,
+) -> Result<Json<SettingsResponse>, ApiError> {
+    let row = sqlx::query(
+        "SELECT obs_host, obs_port, obs_password, configured FROM settings WHERE id = 1",
+    )
+    .fetch_one(&state.db)
+    .await?;
     Ok(Json(SettingsResponse {
-        obs_host: row.get("obs_host"), obs_port: row.get::<i64, _>("obs_port") as u16,
+        obs_host: row.get("obs_host"),
+        obs_port: row.get::<i64, _>("obs_port") as u16,
         configured: row.get::<i64, _>("configured") != 0,
         password_saved: !row.get::<String, _>("obs_password").is_empty(),
     }))
 }
 
-async fn put_settings(State(state): State<SharedState>, Json(input): Json<SettingsInput>) -> Result<Json<SettingsResponse>, ApiError> {
+async fn put_settings(
+    State(state): State<SharedState>,
+    Json(input): Json<SettingsInput>,
+) -> Result<Json<SettingsResponse>, ApiError> {
     validate_host(&input.obs_host)?;
-    if input.obs_port == 0 { return Err(ApiError(StatusCode::BAD_REQUEST, "OBS port must be between 1 and 65535.".into())); }
-    if input.obs_password.as_deref().is_some_and(|v| v.len() > 256) { return Err(ApiError(StatusCode::BAD_REQUEST, "OBS password is too long.".into())); }
+    if input.obs_port == 0 {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "OBS port must be between 1 and 65535.".into(),
+        ));
+    }
+    if input.obs_password.as_deref().is_some_and(|v| v.len() > 256) {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "OBS password is too long.".into(),
+        ));
+    }
     if let Some(password) = input.obs_password {
         sqlx::query("UPDATE settings SET obs_host = ?, obs_port = ?, obs_password = ?, configured = 1 WHERE id = 1")
             .bind(input.obs_host.trim()).bind(input.obs_port as i64).bind(password).execute(&state.db).await?;
     } else {
         sqlx::query("UPDATE settings SET obs_host = ?, obs_port = ?, configured = 1 WHERE id = 1")
-            .bind(input.obs_host.trim()).bind(input.obs_port as i64).execute(&state.db).await?;
+            .bind(input.obs_host.trim())
+            .bind(input.obs_port as i64)
+            .execute(&state.db)
+            .await?;
     }
     get_settings(State(state)).await
 }
 
 fn validate_host(host: &str) -> Result<(), ApiError> {
     let trimmed = host.trim();
-    if trimmed.is_empty() || trimmed.len() > 253 || trimmed.contains('/') || trimmed.contains(':') || trimmed.chars().any(char::is_whitespace) {
-        return Err(ApiError(StatusCode::BAD_REQUEST, "Enter a host name only, such as 127.0.0.1 or host.docker.internal.".into()));
+    if trimmed.is_empty()
+        || trimmed.len() > 253
+        || trimmed.contains('/')
+        || trimmed.contains(':')
+        || trimmed.chars().any(char::is_whitespace)
+    {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "Enter a host name only, such as 127.0.0.1 or host.docker.internal.".into(),
+        ));
     }
     Ok(())
 }
 
-async fn get_checklist(State(state): State<SharedState>) -> Result<Json<Vec<ChecklistItem>>, ApiError> {
-    let rows = sqlx::query("SELECT id, text, done FROM checklist ORDER BY position").fetch_all(&state.db).await?;
-    Ok(Json(rows.into_iter().map(|r| ChecklistItem { id: r.get("id"), text: r.get("text"), done: r.get::<i64, _>("done") != 0 }).collect()))
+async fn get_checklist(
+    State(state): State<SharedState>,
+) -> Result<Json<Vec<ChecklistItem>>, ApiError> {
+    let rows = sqlx::query("SELECT id, text, done FROM checklist ORDER BY position")
+        .fetch_all(&state.db)
+        .await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| ChecklistItem {
+                id: r.get("id"),
+                text: r.get("text"),
+                done: r.get::<i64, _>("done") != 0,
+            })
+            .collect(),
+    ))
 }
 
-async fn put_checklist(State(state): State<SharedState>, Json(items): Json<Vec<ChecklistItem>>) -> Result<Json<Vec<ChecklistItem>>, ApiError> {
-    if items.len() > 50 { return Err(ApiError(StatusCode::BAD_REQUEST, "A checklist can contain at most 50 items.".into())); }
-    for item in &items { validate_text("Checklist item", &item.text, 200)?; validate_id(&item.id)?; }
+async fn put_checklist(
+    State(state): State<SharedState>,
+    Json(items): Json<Vec<ChecklistItem>>,
+) -> Result<Json<Vec<ChecklistItem>>, ApiError> {
+    if items.len() > 50 {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "A checklist can contain at most 50 items.".into(),
+        ));
+    }
+    for item in &items {
+        validate_text("Checklist item", &item.text, 200)?;
+        validate_id(&item.id)?;
+    }
     let mut tx = state.db.begin().await?;
-    sqlx::query("DELETE FROM checklist").execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM checklist")
+        .execute(&mut *tx)
+        .await?;
     for (position, item) in items.iter().enumerate() {
         sqlx::query("INSERT INTO checklist (id, position, text, done) VALUES (?, ?, ?, ?)")
-            .bind(&item.id).bind(position as i64).bind(item.text.trim()).bind(item.done).execute(&mut *tx).await?;
+            .bind(&item.id)
+            .bind(position as i64)
+            .bind(item.text.trim())
+            .bind(item.done)
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
     get_checklist(State(state)).await
 }
 
 async fn get_cues(State(state): State<SharedState>) -> Result<Json<Vec<Cue>>, ApiError> {
-    let rows = sqlx::query("SELECT id, label, scene_name FROM cues ORDER BY position").fetch_all(&state.db).await?;
-    Ok(Json(rows.into_iter().map(|r| Cue { id: r.get("id"), label: r.get("label"), scene_name: r.get("scene_name") }).collect()))
+    let rows = sqlx::query("SELECT id, label, scene_name FROM cues ORDER BY position")
+        .fetch_all(&state.db)
+        .await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| Cue {
+                id: r.get("id"),
+                label: r.get("label"),
+                scene_name: r.get("scene_name"),
+            })
+            .collect(),
+    ))
 }
 
-async fn put_cues(State(state): State<SharedState>, Json(cues): Json<Vec<Cue>>) -> Result<Json<Vec<Cue>>, ApiError> {
-    if cues.len() > 9 { return Err(ApiError(StatusCode::BAD_REQUEST, "You can assign at most nine keyboard cues.".into())); }
-    for cue in &cues { validate_id(&cue.id)?; validate_text("Cue label", &cue.label, 60)?; validate_text("Scene name", &cue.scene_name, 128)?; }
+async fn put_cues(
+    State(state): State<SharedState>,
+    Json(cues): Json<Vec<Cue>>,
+) -> Result<Json<Vec<Cue>>, ApiError> {
+    if cues.len() > 9 {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "You can assign at most nine keyboard cues.".into(),
+        ));
+    }
+    for cue in &cues {
+        validate_id(&cue.id)?;
+        validate_text("Cue label", &cue.label, 60)?;
+        validate_text("Scene name", &cue.scene_name, 128)?;
+    }
     let mut tx = state.db.begin().await?;
     sqlx::query("DELETE FROM cues").execute(&mut *tx).await?;
     for (position, cue) in cues.iter().enumerate() {
         sqlx::query("INSERT INTO cues (id, position, label, scene_name) VALUES (?, ?, ?, ?)")
-            .bind(&cue.id).bind(position as i64).bind(cue.label.trim()).bind(cue.scene_name.trim()).execute(&mut *tx).await?;
+            .bind(&cue.id)
+            .bind(position as i64)
+            .bind(cue.label.trim())
+            .bind(cue.scene_name.trim())
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
     get_cues(State(state)).await
 }
 
 async fn get_links(State(state): State<SharedState>) -> Result<Json<Vec<PlatformLink>>, ApiError> {
-    let rows = sqlx::query("SELECT id, label, url FROM platform_links ORDER BY position").fetch_all(&state.db).await?;
-    Ok(Json(rows.into_iter().map(|r| PlatformLink { id: r.get("id"), label: r.get("label"), url: r.get("url") }).collect()))
+    let rows = sqlx::query("SELECT id, label, url FROM platform_links ORDER BY position")
+        .fetch_all(&state.db)
+        .await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| PlatformLink {
+                id: r.get("id"),
+                label: r.get("label"),
+                url: r.get("url"),
+            })
+            .collect(),
+    ))
 }
 
-async fn put_links(State(state): State<SharedState>, Json(links): Json<Vec<PlatformLink>>) -> Result<Json<Vec<PlatformLink>>, ApiError> {
-    if links.len() > 8 { return Err(ApiError(StatusCode::BAD_REQUEST, "You can save at most eight metadata links.".into())); }
+async fn put_links(
+    State(state): State<SharedState>,
+    Json(links): Json<Vec<PlatformLink>>,
+) -> Result<Json<Vec<PlatformLink>>, ApiError> {
+    if links.len() > 8 {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "You can save at most eight metadata links.".into(),
+        ));
+    }
     for link in &links {
-        validate_id(&link.id)?; validate_text("Link label", &link.label, 80)?;
-        let url = url::Url::parse(&link.url).map_err(|_| ApiError(StatusCode::BAD_REQUEST, "Each metadata link needs a complete web address.".into()))?;
-        if !matches!(url.scheme(), "http" | "https") { return Err(ApiError(StatusCode::BAD_REQUEST, "Metadata links must use http or https.".into())); }
+        validate_id(&link.id)?;
+        validate_text("Link label", &link.label, 80)?;
+        let url = url::Url::parse(&link.url).map_err(|_| {
+            ApiError(
+                StatusCode::BAD_REQUEST,
+                "Each metadata link needs a complete web address.".into(),
+            )
+        })?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(ApiError(
+                StatusCode::BAD_REQUEST,
+                "Metadata links must use http or https.".into(),
+            ));
+        }
     }
     let mut tx = state.db.begin().await?;
-    sqlx::query("DELETE FROM platform_links").execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM platform_links")
+        .execute(&mut *tx)
+        .await?;
     for (position, link) in links.iter().enumerate() {
         sqlx::query("INSERT INTO platform_links (id, position, label, url) VALUES (?, ?, ?, ?)")
-            .bind(&link.id).bind(position as i64).bind(link.label.trim()).bind(link.url.trim()).execute(&mut *tx).await?;
+            .bind(&link.id)
+            .bind(position as i64)
+            .bind(link.label.trim())
+            .bind(link.url.trim())
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await?;
     get_links(State(state)).await
@@ -277,20 +464,42 @@ async fn put_links(State(state): State<SharedState>, Json(links): Json<Vec<Platf
 
 fn validate_text(name: &str, value: &str, max: usize) -> Result<(), ApiError> {
     let length = value.trim().chars().count();
-    if length == 0 || length > max { return Err(ApiError(StatusCode::BAD_REQUEST, format!("{name} must be between 1 and {max} characters."))); }
+    if length == 0 || length > max {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            format!("{name} must be between 1 and {max} characters."),
+        ));
+    }
     Ok(())
 }
 
 fn validate_id(id: &str) -> Result<(), ApiError> {
-    if id.is_empty() || id.len() > 80 || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
-        return Err(ApiError(StatusCode::BAD_REQUEST, "An item identifier was invalid.".into()));
+    if id.is_empty()
+        || id.len() > 80
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "An item identifier was invalid.".into(),
+        ));
     }
     Ok(())
 }
 
 async fn obs_client(db: &SqlitePool) -> Result<obws::Client, ApiError> {
-    let row = sqlx::query("SELECT obs_host, obs_port, obs_password, configured FROM settings WHERE id = 1").fetch_one(db).await?;
-    if row.get::<i64, _>("configured") == 0 { return Err(ApiError(StatusCode::PRECONDITION_REQUIRED, "Configure the OBS WebSocket connection first.".into())); }
+    let row = sqlx::query(
+        "SELECT obs_host, obs_port, obs_password, configured FROM settings WHERE id = 1",
+    )
+    .fetch_one(db)
+    .await?;
+    if row.get::<i64, _>("configured") == 0 {
+        return Err(ApiError(
+            StatusCode::PRECONDITION_REQUIRED,
+            "Configure the OBS WebSocket connection first.".into(),
+        ));
+    }
     let host: String = row.get("obs_host");
     let port = row.get::<i64, _>("obs_port") as u16;
     let password: String = row.get("obs_password");
@@ -301,17 +510,45 @@ async fn obs_client(db: &SqlitePool) -> Result<obws::Client, ApiError> {
 
 async fn get_obs_status(State(state): State<SharedState>) -> Result<Json<ObsStatus>, ApiError> {
     let client = obs_client(&state.db).await?;
-    let response = client.scenes().list().await.map_err(|_| ApiError(StatusCode::BAD_GATEWAY, "Connected to OBS, but could not read its scenes.".into()))?;
-    let scenes = response.scenes.into_iter().map(|scene| scene.id.name).collect();
+    let response = client.scenes().list().await.map_err(|_| {
+        ApiError(
+            StatusCode::BAD_GATEWAY,
+            "Connected to OBS, but could not read its scenes.".into(),
+        )
+    })?;
+    let scenes = response
+        .scenes
+        .into_iter()
+        .map(|scene| scene.id.name)
+        .collect();
     let current_scene = response.current_program_scene.map(|scene| scene.name);
-    Ok(Json(ObsStatus { connected: true, message: "OBS is connected and ready.".into(), scenes, current_scene }))
+    Ok(Json(ObsStatus {
+        connected: true,
+        message: "OBS is connected and ready.".into(),
+        scenes,
+        current_scene,
+    }))
 }
 
-async fn set_scene(State(state): State<SharedState>, Json(input): Json<SceneInput>) -> Result<Json<ObsStatus>, ApiError> {
+async fn set_scene(
+    State(state): State<SharedState>,
+    Json(input): Json<SceneInput>,
+) -> Result<Json<ObsStatus>, ApiError> {
     validate_text("Scene name", &input.scene_name, 128)?;
     let client = obs_client(&state.db).await?;
-    client.scenes().set_current_program_scene(input.scene_name.as_str()).await
-        .map_err(|_| ApiError(StatusCode::BAD_GATEWAY, format!("OBS could not switch to scene ‘{}’. Refresh scenes and check the cue name.", input.scene_name)))?;
+    client
+        .scenes()
+        .set_current_program_scene(input.scene_name.as_str())
+        .await
+        .map_err(|_| {
+            ApiError(
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "OBS could not switch to scene ‘{}’. Refresh scenes and check the cue name.",
+                    input.scene_name
+                ),
+            )
+        })?;
     let mut status = get_obs_status(State(state)).await?.0;
     status.message = format!("Scene changed to {}.", input.scene_name);
     Ok(Json(status))
@@ -322,7 +559,11 @@ mod tests {
     use super::*;
 
     async fn test_state() -> SharedState {
-        let db = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.expect("memory database");
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("memory database");
         migrate(&db).await.expect("migrate test database");
         seed(&db).await.expect("seed test database");
         Arc::new(AppState { db })
@@ -346,34 +587,73 @@ mod tests {
     #[tokio::test]
     async fn persistent_routes_round_trip_and_obs_requires_setup() {
         let state = test_state().await;
-        let settings = get_settings(State(state.clone())).await.expect("get settings").0;
+        let settings = get_settings(State(state.clone()))
+            .await
+            .expect("get settings")
+            .0;
         assert!(!settings.configured);
 
-        let initial = get_checklist(State(state.clone())).await.expect("get checklist").0;
+        let initial = get_checklist(State(state.clone()))
+            .await
+            .expect("get checklist")
+            .0;
         assert_eq!(initial.len(), 5);
-        let saved = put_checklist(State(state.clone()), Json(vec![ChecklistItem {
-            id: "test-item".into(), text: "Check captions".into(), done: true,
-        }])).await.expect("save checklist").0;
+        let saved = put_checklist(
+            State(state.clone()),
+            Json(vec![ChecklistItem {
+                id: "test-item".into(),
+                text: "Check captions".into(),
+                done: true,
+            }]),
+        )
+        .await
+        .expect("save checklist")
+        .0;
         assert_eq!(saved[0].text, "Check captions");
         assert!(saved[0].done);
 
-        let cues = put_cues(State(state.clone()), Json(vec![Cue {
-            id: "test-cue".into(), label: "Starting soon".into(), scene_name: "Intro".into(),
-        }])).await.expect("save cues").0;
+        let cues = put_cues(
+            State(state.clone()),
+            Json(vec![Cue {
+                id: "test-cue".into(),
+                label: "Starting soon".into(),
+                scene_name: "Intro".into(),
+            }]),
+        )
+        .await
+        .expect("save cues")
+        .0;
         let loaded_cues = get_cues(State(state.clone())).await.expect("get cues").0;
         assert_eq!(loaded_cues.len(), cues.len());
         assert_eq!(loaded_cues[0].scene_name, "Intro");
 
-        let links = put_links(State(state.clone()), Json(vec![PlatformLink {
-            id: "test-link".into(), label: "Creator page".into(), url: "https://example.com/creator".into(),
-        }])).await.expect("save links").0;
+        let links = put_links(
+            State(state.clone()),
+            Json(vec![PlatformLink {
+                id: "test-link".into(),
+                label: "Creator page".into(),
+                url: "https://example.com/creator".into(),
+            }]),
+        )
+        .await
+        .expect("save links")
+        .0;
         let loaded_links = get_links(State(state.clone())).await.expect("get links").0;
         assert_eq!(loaded_links.len(), links.len());
         assert_eq!(loaded_links[0].url, "https://example.com/creator");
 
-        let status_error = get_obs_status(State(state.clone())).await.expect_err("unconfigured OBS should fail");
+        let status_error = get_obs_status(State(state.clone()))
+            .await
+            .expect_err("unconfigured OBS should fail");
         assert_eq!(status_error.0, StatusCode::PRECONDITION_REQUIRED);
-        let scene_error = set_scene(State(state), Json(SceneInput { scene_name: "Intro".into() })).await.expect_err("unconfigured scene change should fail");
+        let scene_error = set_scene(
+            State(state),
+            Json(SceneInput {
+                scene_name: "Intro".into(),
+            }),
+        )
+        .await
+        .expect_err("unconfigured scene change should fail");
         assert_eq!(scene_error.0, StatusCode::PRECONDITION_REQUIRED);
     }
 }

@@ -1,5 +1,11 @@
 # Stream Access Cues — build handoff
 
+## Independent verification status: **FAIL**
+
+Verified 2026-08-27 against candidate `ddd9441a557a9ac5f8074a1f6de5e23e4eed1adc` and `https://stream-access-cues.sociobot.in`.
+
+The candidate's local build, tests, browser checks, and isolated OBS scene-change flow pass, and its public static assets match the candidate exactly. It is nevertheless **not approved for release**: the public deployment exposes a shared unauthenticated mutable SQLite/API service, contradicting the local-first privacy contract and allowing any visitor to replace another operator's saved settings/cues/checklist/links. `/health` also reports `build_sha: "development"`, not an immutable release identity. See `.factory/verification.md` for exact request evidence, scope, severity, and remediation. The historical builder claims below are superseded by this independent verdict where they conflict.
+
 Date: 2026-08-27
 
 Work order: `stream-access-cues-build-1`

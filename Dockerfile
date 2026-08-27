@@ -4,7 +4,7 @@ ARG BUILD_SHA
 ENV BUILD_SHA=$BUILD_SHA
 COPY package.json package-lock.json vite.config.ts tsconfig.json svelte.config.js ./
 COPY frontend ./frontend
-COPY .git ./.git
+RUN test -n "$BUILD_SHA" && test "$BUILD_SHA" != "unversioned-build"
 RUN npm ci && npm run build
 
 FROM rust:1.88-bookworm AS server
@@ -14,7 +14,7 @@ ENV BUILD_SHA=$BUILD_SHA
 COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY src ./src
-COPY .git ./.git
+RUN test -n "$BUILD_SHA" && test "$BUILD_SHA" != "unversioned-build"
 RUN cargo build --release --locked
 
 FROM debian:bookworm-slim AS runtime

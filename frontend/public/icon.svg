@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Stream Access Cues">
+  <rect width="64" height="64" rx="12" fill="#282b25"/>
+  <rect x="10" y="13" width="44" height="38" rx="5" fill="#10120f" stroke="#f3eedb" stroke-width="2"/>
+  <circle cx="45" cy="23" r="5" fill="#79d39b"/>
+  <rect x="17" y="33" width="9" height="9" rx="2" fill="#f3b84b"/>
+  <rect x="29" y="33" width="9" height="9" rx="2" fill="#f3b84b"/>
+  <rect x="41" y="33" width="9" height="9" rx="2" fill="#f3b84b"/>
+</svg>

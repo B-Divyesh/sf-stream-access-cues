@@ -1,0 +1,7 @@
+node_modules
+target
+dist
+data
+.git
+assets/src
+*.md

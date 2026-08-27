@@ -1,6 +1,14 @@
 node_modules/
+target/
 dist/
+data/
 .env
 *.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 graphify-out/
+test-results/
+playwright-report/
+.factory/evidence/
 .DS_Store

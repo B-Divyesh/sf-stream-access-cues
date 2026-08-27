@@ -1,14 +1,72 @@
 # Stream Access Cues
 
-Live: https://stream-access-cues.sociobot.in — built by the Param Factory (`web-with-backend`).
+Stream Access Cues is a local-first, keyboard and screen-reader-friendly control surface for independent streamers. It connects to OBS WebSocket for named scene changes, keeps a spoken preflight checklist and session timer, and opens the platform-owned pages where stream metadata can actually be edited.
 
-See `.factory/brief.json` for the researched problem this solves and `.factory/design.md` for the visual system.
+It does **not** stream video, replace OBS, write Twitch/YouTube metadata, or store OAuth tokens. There are no accounts, analytics, third-party scripts, or paid features.
 
-## Develop
+## Who it is for
 
-```
+The primary user is a blind or keyboard-first solo streamer who cannot reliably use inaccessible embedded browser docks. The whole live surface is operable with native controls, announced state, and documented shortcuts.
+
+## Requirements
+
+- Node.js 22+ and npm
+- Rust 1.88+ for the local service
+- OBS 28+ with its WebSocket server enabled under **Tools → WebSocket Server Settings**
+- Docker 24+ for the production container path
+
+## Run locally
+
+```bash
 npm install
+npm run build
 npm run dev
-npm test
-npm run build   # -> dist/
 ```
+
+The Vite UI runs at `http://localhost:5173` and proxies local API requests to the Rust service on port 8080. `npm run build` reproducibly writes the static frontend to `dist/`, with `dist/index.html` at its root.
+
+The service stores its SQLite database under `./data` by default. Change that with `DATA_DIR`. Other configuration:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `8080` | HTTP listen port |
+| `DATA_DIR` | `data` | SQLite persistence directory |
+| `DIST_DIR` | `dist` | Built frontend directory |
+| `RUST_LOG` | service info logs | Structured log filter |
+| `BUILD_SHA` | `development` | Value returned by `/health` |
+
+## Test and check
+
+```bash
+npm test
+npm run check
+npm run build
+```
+
+The test command runs frontend unit tests and Rust tests. The check command runs Svelte/TypeScript diagnostics and strict Rust Clippy.
+
+## Production container
+
+```bash
+docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t stream-access-cues .
+docker run --rm -p 8080:8080 -v stream-access-cues-data:/app/data stream-access-cues
+```
+
+Open `http://localhost:8080`. When OBS runs on the Docker host, use `host.docker.internal` on Docker Desktop. On Linux, add `--add-host=host.docker.internal:host-gateway` or use a host network appropriate to your environment.
+
+## Keyboard map
+
+- Control/Command + Shift + 1–9: trigger scene cues
+- Control/Command + Shift + T: start or pause the timer
+- Control/Command + Shift + R: confirm timer reset
+- Control/Command + Shift + C: focus the next incomplete checklist item
+- Control/Command + Shift + S: speak current scene, time, and next item
+- `?`: open the shortcut guide outside text fields
+
+## Privacy and deployment
+
+OBS credentials, cues, checklist, and links stay in the local SQLite file. The browser stores only the timer and an offline shell cache. See `/privacy` and `/terms` in the running app. The factory owns deployment, DNS, and infrastructure; this repository contains no deployment credentials.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

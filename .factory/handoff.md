@@ -2,11 +2,11 @@
 
 ## Release status: ready for container promotion
 
-Repaired the two release blockers recorded in independent verification report `442ad90a5d0911b8bd6d2840be801cffe078ff18`. Product-code repairs are committed as `5ee45e563a1e5eda7831f1a493fbf3133fa2a4ce` and `b19854e3c8d93f42f3dcd2439978256f6e52f273`.
+Repaired the two release blockers recorded in independent verification report `442ad90a5d0911b8bd6d2840be801cffe078ff18`. Product-code repairs are committed as `5ee45e563a1e5eda7831f1a493fbf3133fa2a4ce`, `b19854e3c8d93f42f3dcd2439978256f6e52f273`, and `b10eaa61276fc89e134bc360403e3ad649244e8e`.
 
 ### What changed
 
-1. **Traceable artifact identity (P0).** The Docker build now receives repository Git metadata instead of excluding it. Both Vite and Rust derive `BUILD_SHA` from the checked-out revision when an explicit build argument is absent. `build.rs` watches both `HEAD` and its branch ref, so an ordinary commit rebuilds the binary identity instead of retaining the previous SHA. A local release build made at `b19854e…` returned that exact SHA from `/health`, and its generated JS embedded the same SHA.
+1. **Traceable artifact identity (P0).** The Dockerfile requires a non-empty immutable `BUILD_SHA`; the factory deployment passes the checked-out Git revision as its build argument, so it cannot build an `unversioned-build` image. Both Vite and Rust embed that value. `build.rs` also watches both `HEAD` and its branch ref, so ordinary local commits rebuild the binary identity instead of retaining the previous SHA. A local release build made at `b19854e…` returned that exact SHA from `/health`, and its generated JS embedded the same SHA.
 2. **Genuinely local OBS control (P1).** The container defaults to `DEPLOYMENT_MODE=hosted`. In that mode the service removes any existing OBS setting at startup, refuses OBS credential writes and all OBS status/scene routes with `403`, and never opens a network connection to OBS. The public UI identifies itself as a setup guide and provides an accessible keyboard-operable local-container walkthrough. The documented `DEPLOYMENT_MODE=local` workflow preserves the original local OBS functionality and keeps the password in the local SQLite volume. It explicitly warns users not to expose OBS WebSocket publicly.
 3. **Regression coverage.** Rust tests assert the hosted runtime declaration and all three protected OBS paths. A separate Playwright hosted-mode project tests desktop and 390 px mobile setup flow, dialog keyboard dismissal, the rejected credential write, and axe serious/critical findings. Playwright is pinned to `1.58.2` to match the supplied browser.
 
@@ -50,7 +50,7 @@ All runs were completed from this repair checkout on 2026-08-27.
 
 ## Deployment
 
-Deploy with `/opt/fleet/lib/deploy-container.sh stream-access-cues /work/repo Dockerfile 8080`. The Dockerfile is still a non-root multi-stage Rust/Vite container on port 8080. Its default `DEPLOYMENT_MODE=hosted` is required for the public endpoint; do not override it there.
+Build the image with the checked-out commit as its required argument, then supply the resulting image to `/opt/fleet/lib/deploy-container.sh` as its prebuilt-image argument. The Dockerfile is still a non-root multi-stage Rust/Vite container on port 8080. Its default `DEPLOYMENT_MODE=hosted` is required for the public endpoint; do not override it there.
 
 After deployment, verify all of the following against `https://stream-access-cues.sociobot.in`:
 

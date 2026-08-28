@@ -62,6 +62,9 @@ mode baked into the image defaults. It must not be given OBS credentials.
 | Offline/update | Service-worker-controlled offline reload rendered the h1. A new release worker (`stream-access-cues-update-check`) took control and left only its cache after its first controlled request. |
 | Concurrency | 100 parallel local `/health` requests all returned 200. |
 | Lighthouse mobile/local | Lighthouse 13.4.1 using the supplied Playwright Chromium: Performance 99, Accessibility 100, Best Practices 100, SEO 100; LCP 1.9 s, CLS 0.023. |
+| Exact clean deployment | `/opt/fleet/lib/deploy-container.sh stream-access-cues /work/repo Dockerfile 8080` built and deployed source commit `f5e6266f760b1c7ad78d24d42e31588754b7149e`, forwarding that complete SHA to `BUILD_SHA`, `GIT_SHA`, and `SOURCE_COMMIT`, with only `PORT=8080` configured for the Container App. |
+| Live identity and hosted boundary | `https://stream-access-cues.sociobot.in/health` returned `{"status":"ok","build_sha":"f5e6266f760b1c7ad78d24d42e31588754b7149e"}`. Live `/api/runtime` returned that same SHA with `deployment_mode:"hosted"` and `obs_control_available:false`. |
+| Live browser/privacy smoke | `verify-url.sh` passed at the public URL (200, title/lang/main/h1/alt/buttons, no console/page errors). A live 390 px Playwright check found no horizontal overflow, axe serious/critical = 0, and only same-origin requests. |
 
 ## Deployment and post-deploy check
 

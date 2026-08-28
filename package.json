@@ -9,7 +9,8 @@
     "dev:server": "cargo run",
     "build": "vite build",
     "build:server": "cargo build --release",
-    "test": "vitest run && cargo test",
+    "test": "vitest run && cargo test && npm run test:build-identity",
+    "test:build-identity": "bash tests/build-identity.sh",
     "test:e2e": "playwright test && playwright test --config=playwright.hosted.config.ts",
     "check": "svelte-check --tsconfig ./tsconfig.json && cargo clippy --all-targets -- -D warnings"
   },

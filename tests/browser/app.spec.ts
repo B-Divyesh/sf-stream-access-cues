@@ -67,3 +67,33 @@ test('390px layout does not scroll sideways', async ({ page }) => {
   const widths = await page.evaluate(() => ({ body: document.body.scrollWidth, viewport: document.documentElement.clientWidth }));
   expect(widths.body).toBeLessThanOrEqual(widths.viewport);
 });
+
+test('offline shell loads and an updated worker removes the previous release cache', async ({ page, context }) => {
+  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  await context.setOffline(true);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('h1')).toHaveCount(1);
+  await context.setOffline(false);
+
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.register('/sw.js?build=playwright-update-check');
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error('Updated worker did not take control.')), 5_000);
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        window.clearTimeout(timeout);
+        resolve();
+      }, { once: true });
+    });
+    // The first new-worker request sweeps a cache that an outgoing worker may
+    // have completed while the update was installing.
+    await fetch('/icon.svg');
+  });
+  await page.waitForFunction(async () => (await caches.keys()).length === 1);
+  const cacheState = await page.evaluate(async () => ({
+    controller: navigator.serviceWorker.controller?.scriptURL,
+    caches: await caches.keys()
+  }));
+  expect(cacheState.controller).toContain('playwright-update-check');
+  expect(cacheState.caches).toEqual(['stream-access-cues-playwright-update-check']);
+});

@@ -1,14 +1,32 @@
 # Stream Access Cues — repair handoff
 
-## Release status: ready for container promotion
+## Release status
 
-Repaired the two release blockers recorded in independent verification report `442ad90a5d0911b8bd6d2840be801cffe078ff18`. Product-code repairs are committed as `5ee45e563a1e5eda7831f1a493fbf3133fa2a4ce`, `b19854e3c8d93f42f3dcd2439978256f6e52f273`, and `b10eaa61276fc89e134bc360403e3ad649244e8e`.
+Repaired candidate `877abcd9294622870e413794abc814a6727bc3d6` for the original
+container deployment class. The service remains a Rust/Axum backend serving the
+Vite/Svelte dashboard from one non-root, multi-stage container on port 8080.
 
-### What changed
+## What changed
 
-1. **Traceable artifact identity (P0).** The Dockerfile requires a non-empty immutable `BUILD_SHA`; the factory deployment passes the checked-out Git revision as its build argument, so it cannot build an `unversioned-build` image. Both Vite and Rust embed that value. `build.rs` also watches both `HEAD` and its branch ref, so ordinary local commits rebuild the binary identity instead of retaining the previous SHA. A local release build made at `b19854e…` returned that exact SHA from `/health`, and its generated JS embedded the same SHA.
-2. **Genuinely local OBS control (P1).** The container defaults to `DEPLOYMENT_MODE=hosted`. In that mode the service removes any existing OBS setting at startup, refuses OBS credential writes and all OBS status/scene routes with `403`, and never opens a network connection to OBS. The public UI identifies itself as a setup guide and provides an accessible keyboard-operable local-container walkthrough. The documented `DEPLOYMENT_MODE=local` workflow preserves the original local OBS functionality and keeps the password in the local SQLite volume. It explicitly warns users not to expose OBS WebSocket publicly.
-3. **Regression coverage.** Rust tests assert the hosted runtime declaration and all three protected OBS paths. A separate Playwright hosted-mode project tests desktop and 390 px mobile setup flow, dialog keyboard dismissal, the rejected credential write, and axe serious/critical findings. Playwright is pinned to `1.58.2` to match the supplied browser.
+- Reproduced the ACR source-tarball failure with `az acr build --registry
+  sociobotregistry --image sf-stream-access-cues:build-sha-regression-repro
+  --file Dockerfile .` (run `chah`): the old Dockerfile stopped at
+  `RUN test -n "$BUILD_SHA"` because no build argument was supplied.
+- Declared global `ARG BUILD_SHA=dev`, redeclared it in the web, Rust, and
+  runtime stages, and recorded it in the runtime OCI revision label. Empty or
+  absent local build arguments now produce `dev`; the factory-supplied full
+  SHA is passed unchanged to both Vite and Rust.
+- Removed all build-time Git execution from `Dockerfile`, `build.rs`, and
+  `vite.config.ts`. This works with the factory ACR tarball, which excludes
+  `.git`.
+- Added `tests/build-identity.sh`, run by `npm test`. It statically guards the
+  Docker argument contract, builds with the complete 40-character supplied
+  SHA, starts the compiled binary using an empty environment except `PORT`,
+  and asserts that `/health` and the frontend bundle contain that exact SHA.
+- Fixed a service-worker update race found during verification. An outgoing
+  worker could complete a late cache write after activation; the first request
+  controlled by the new worker now sweeps stale release caches. Playwright
+  covers offline reload and worker/cache replacement on desktop and mobile.
 
 ## How to run
 
@@ -21,47 +39,54 @@ cargo build --release --locked
 npm run test:e2e
 ```
 
-For the real local control surface, use the command in `README.md` (or the public setup dialog):
+For local OBS control:
 
 ```bash
 docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t stream-access-cues .
 docker run --rm -p 8080:8080 -v stream-access-cues-data:/app/data -e DEPLOYMENT_MODE=local stream-access-cues
 ```
 
-Open `http://localhost:8080`, then configure OBS under Tools → WebSocket Server Settings. The deployed container intentionally remains in hosted setup-guide mode.
+The factory deployment passes only `PORT` at runtime and uses hosted setup-guide
+mode baked into the image defaults. It must not be given OBS credentials.
 
-## Verification evidence
-
-All runs were completed from this repair checkout on 2026-08-27.
+## Verification evidence (2026-08-28)
 
 | Check | Result |
 | --- | --- |
-| Clean install and production audit | `npm ci` passed; `npm audit --omit=dev`: 0 vulnerabilities. |
-| Unit/integration | `npm test`: 3 Vitest + 6 Rust tests passed, including hosted OBS refusal and prior isolation/validation coverage. |
-| Types/lint | `npm run check`: 0 Svelte diagnostics; Clippy with `-D warnings` passed. |
-| Production build | `npm run build` passed: 72.55 KB JS raw / 26.14 KB gzip and 13.54 KB CSS raw / 3.89 KB gzip. `cargo build --release --locked` passed. |
-| Browser / keyboard / mobile | `npm run test:e2e`: local dashboard 10/10 plus hosted setup 2/2 passed on desktop and 390×844 Chromium. Includes keyboard timer/shortcuts, dialog Escape, persistence/isolation, no mobile horizontal overflow, and axe serious/critical = 0. |
-| Runtime hosted policy | Local hosted-mode smoke: `/api/runtime` declared `obs_control_available:false`; `PUT /api/settings` with an OBS password returned `403` and the recovery message. No route can make the deployment host reach a visitor’s localhost. |
-| Headers / response policy / privacy | `/health` was `no-store`; hashed JS was immutable for one year. CSP, HSTS, COOP, CORP, Permissions-Policy, nosniff, frame deny, and no-referrer were observed. `verify-url.sh` passed with title, `lang=en`, one `h1`, `main`, image alt, no unlabeled buttons, and no normal-load console errors. |
-| Offline/update | A service-worker-controlled offline reload displayed the application heading. Registering a new release query activated `stream-access-cues-qa-update-check-2` and removed prior release caches. |
+| Failed-build reproduction | ACR run `chah` failed as expected at Docker step 7/27: `test -n "$BUILD_SHA"` exited 1; ACR explicitly reported that `.git` was excluded from the uploaded source tarball. |
+| Focused build identity | `npm test` passed: 3 Vitest tests, 6 Rust tests, plus `tests/build-identity.sh`. The latter built with `877abcd9294622870e413794abc814a6727bc3d6`, used only `PORT=18080` at process start, and observed `{"status":"ok","build_sha":"877abcd9294622870e413794abc814a6727bc3d6"}`. |
+| Types/lint | `npm run check` passed: 0 Svelte errors/warnings; Clippy `-D warnings` passed. |
+| Production build | `BUILD_SHA=877abcd9294622870e413794abc814a6727bc3d6 npm run build` and `cargo build --release --locked` passed. Output: 72.55 KB JS raw / 26.15 KB gzip; 13.54 KB CSS raw / 3.89 KB gzip. |
+| Browser, mobile, keyboard, accessibility | `npm run test:e2e` passed 14/14 Chromium checks: desktop + 390×844 layout, keyboard shortcuts/dialog Escape, persistence/isolation, hosted OBS refusal, offline/update behavior, and axe serious/critical = 0. |
+| Local response/privacy policy | `verify-url.sh` passed with title, `lang=en`, one `h1`, `main`, image alt text, labeled buttons, and no page/console errors. First-load browser requests are same-origin; no analytics or third-party assets are used. `/health` returned `no-store`; CSP, HSTS, COOP, CORP, Permissions-Policy, nosniff, DENY framing, and no-referrer were present. `npm audit --omit=dev`: 0 vulnerabilities. |
+| Offline/update | Service-worker-controlled offline reload rendered the h1. A new release worker (`stream-access-cues-update-check`) took control and left only its cache after its first controlled request. |
 | Concurrency | 100 parallel local `/health` requests all returned 200. |
-| Lighthouse mobile/local | Lighthouse 12.8.2: Performance 99, Accessibility 100, Best Practices 100, SEO 100; LCP 1.9 s, CLS 0.023. |
-| Build identity | A fresh local release server built after `b19854e…` logged and returned `build_sha:"b19854e3c8d93f42f3dcd2439978256f6e52f273"`; its frontend bundle embedded the same value. The container uses the same Git-derived path. |
+| Lighthouse mobile/local | Lighthouse 13.4.1 using the supplied Playwright Chromium: Performance 99, Accessibility 100, Best Practices 100, SEO 100; LCP 1.9 s, CLS 0.023. |
 
-## Deployment
+## Deployment and post-deploy check
 
-Build the image with the checked-out commit as its required argument, then supply the resulting image to `/opt/fleet/lib/deploy-container.sh` as its prebuilt-image argument. The Dockerfile is still a non-root multi-stage Rust/Vite container on port 8080. Its default `DEPLOYMENT_MODE=hosted` is required for the public endpoint; do not override it there.
+Deploy with the work-order configuration:
 
-After deployment, verify all of the following against `https://stream-access-cues.sociobot.in`:
+```bash
+/opt/fleet/lib/deploy-container.sh stream-access-cues /work/repo Dockerfile 8080
+```
+
+The helper passes the checked-out commit to `BUILD_SHA`, `GIT_SHA`, and
+`SOURCE_COMMIT`, builds through ACR from a `.git`-free tarball, and supplies
+only `PORT=8080` to the Container App. After deployment, verify:
 
 ```bash
 curl -fsS https://stream-access-cues.sociobot.in/health
 curl -fsS https://stream-access-cues.sociobot.in/api/runtime
 ```
 
-The health SHA must be the deployed Git commit, and runtime must say `"deployment_mode":"hosted"` and `"obs_control_available":false`.
+`/health.build_sha` must exactly equal the deployed Git commit; runtime must
+report `deployment_mode:"hosted"` and `obs_control_available:false`.
 
 ## Known limits
 
-- Docker is not installed in this worker, so the image could not be built locally; the locked frontend and Rust release stages passed independently. The factory container deployment is the final image validation.
-- No OBS 28+ server or Windows/NVDA environment was available. The existing local API/browser behavior is retained, but a blind acceptance pass with real OBS remains a useful final field check.
+- Docker is not installed in this worker. The exact clean ACR build and live
+  deployment use the factory helper instead.
+- No physical OBS 28+ server or Windows/NVDA workstation is available here;
+  real OBS scene switching and an NVDA acceptance pass remain useful field
+  checks. The hosted service intentionally cannot contact OBS.

@@ -1,10 +1,14 @@
+# Build identity is supplied by the factory. Keep a local-build default: ACR
+# source archives intentionally exclude .git, so identity must never be read
+# from the checkout during a container build.
+ARG BUILD_SHA=dev
+
 FROM node:22-bookworm-slim AS web
 WORKDIR /app
 ARG BUILD_SHA
 ENV BUILD_SHA=$BUILD_SHA
 COPY package.json package-lock.json vite.config.ts tsconfig.json svelte.config.js ./
 COPY frontend ./frontend
-RUN test -n "$BUILD_SHA" && test "$BUILD_SHA" != "unversioned-build"
 RUN npm ci && npm run build
 
 FROM rust:1.88-bookworm AS server
@@ -14,10 +18,11 @@ ENV BUILD_SHA=$BUILD_SHA
 COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY src ./src
-RUN test -n "$BUILD_SHA" && test "$BUILD_SHA" != "unversioned-build"
 RUN cargo build --release --locked
 
 FROM debian:bookworm-slim AS runtime
+ARG BUILD_SHA
+LABEL org.opencontainers.image.revision=$BUILD_SHA
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \

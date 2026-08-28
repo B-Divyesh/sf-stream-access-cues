@@ -57,7 +57,7 @@ docker run --rm -p 8080:8080 -v stream-access-cues-data:/app/data -e DEPLOYMENT_
 
 Open `http://localhost:8080`. This explicit local mode is the supported way to control OBS: it runs the service beside the operator’s OBS instance and keeps its OBS password in the local volume. When OBS runs on the Docker host, use `host.docker.internal` on Docker Desktop. On Linux, add `--add-host=host.docker.internal:host-gateway` or use a host network appropriate to your environment.
 
-The image requires an explicit immutable `BUILD_SHA` (the command above uses the checked-out Git commit) and defaults to `DEPLOYMENT_MODE=hosted` for the public factory deployment. Hosted mode is an accessible setup guide only: it refuses OBS credential writes and all OBS network requests, because `127.0.0.1` on a public container is not the streamer’s computer. It still offers the independently isolated checklist and launch-link workspace, but it cannot change scenes. Never expose the OBS WebSocket publicly.
+The image accepts `BUILD_SHA` and defaults it to `dev` for local builds; the factory always supplies the complete checked-out commit SHA and the image records it in both the compiled service and its OCI revision label. It defaults to `DEPLOYMENT_MODE=hosted` for the public factory deployment. Hosted mode is an accessible setup guide only: it refuses OBS credential writes and all OBS network requests, because `127.0.0.1` on a public container is not the streamer’s computer. It still offers the independently isolated checklist and launch-link workspace, but it cannot change scenes. Never expose the OBS WebSocket publicly.
 
 ## Keyboard map
 

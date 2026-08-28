@@ -35,7 +35,10 @@ impl DeploymentMode {
             Ok("hosted") => Self::Hosted,
             Ok("local") | Err(_) => Self::Local,
             Ok(value) => {
-                warn!(deployment_mode = value, "unknown deployment mode; using local mode");
+                warn!(
+                    deployment_mode = value,
+                    "unknown deployment mode; using local mode"
+                );
                 Self::Local
             }
         }
@@ -979,8 +982,8 @@ mod tests {
     async fn health_has_an_immutable_build_identity() {
         let response = health().await.0;
         assert_eq!(response.status, "ok");
-        assert_ne!(response.build_sha, "development");
         assert_ne!(response.build_sha, "unversioned-build");
+        assert!(!response.build_sha.is_empty());
     }
 
     #[tokio::test]
@@ -998,7 +1001,8 @@ mod tests {
         let runtime_body = to_bytes(runtime_response.into_body(), 1024 * 1024)
             .await
             .expect("runtime body");
-        let runtime: serde_json::Value = serde_json::from_slice(&runtime_body).expect("runtime json");
+        let runtime: serde_json::Value =
+            serde_json::from_slice(&runtime_body).expect("runtime json");
         assert_eq!(runtime["deployment_mode"], "hosted");
         assert_eq!(runtime["obs_control_available"], false);
 

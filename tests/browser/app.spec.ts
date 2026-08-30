@@ -68,6 +68,32 @@ test('390px layout does not scroll sideways', async ({ page }) => {
   expect(widths.body).toBeLessThanOrEqual(widths.viewport);
 });
 
+test('checklist and footer controls meet the 44px pointer-target contract', async ({ page }) => {
+  await page.goto('/');
+  const undersizedTargets = await page.locator('.checklist input[type="checkbox"], .checklist label, footer nav a').evaluateAll((targets) =>
+    targets.map((target) => {
+      const { width, height } = target.getBoundingClientRect();
+      return { name: target.textContent?.trim() || target.getAttribute('aria-label') || target.tagName, width, height };
+    }).filter((target) => target.width < 44 || target.height < 44)
+  );
+  expect(undersizedTargets).toEqual([]);
+});
+
+test('direct legal page navigation returns 200 without browser console errors', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+
+  for (const route of ['/privacy', '/terms']) {
+    const response = await page.goto(route);
+    expect(response?.status(), route).toBe(200);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+  }
+  expect(errors).toEqual([]);
+});
+
 test('offline shell loads and an updated worker removes the previous release cache', async ({ page, context }) => {
   await page.goto('/', { waitUntil: 'networkidle' });
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null);

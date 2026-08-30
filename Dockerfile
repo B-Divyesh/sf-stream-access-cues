@@ -11,7 +11,7 @@ COPY package.json package-lock.json vite.config.ts tsconfig.json svelte.config.j
 COPY frontend ./frontend
 RUN npm ci && npm run build
 
-FROM rust:1.88-bookworm AS server
+FROM rust:1-slim AS server
 WORKDIR /app
 ARG BUILD_SHA
 ENV BUILD_SHA=$BUILD_SHA

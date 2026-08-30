@@ -10,7 +10,14 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
-use std::{collections::HashSet, env, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tower_http::{
     services::{ServeDir, ServeFile},
     set_header::SetResponseHeaderLayer,
@@ -20,6 +27,8 @@ use tracing::{info, warn};
 
 const OPERATOR_HEADER: &str = "x-operator-key";
 const BUILD_SHA: &str = env!("BUILD_SHA");
+const API_RATE_LIMIT_PER_SECOND: u32 = 20;
+const API_RATE_LIMIT_BURST: u32 = API_RATE_LIMIT_PER_SECOND * 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DeploymentMode {
@@ -59,10 +68,63 @@ impl DeploymentMode {
 struct AppState {
     db: SqlitePool,
     initialization_lock: tokio::sync::Mutex<()>,
+    rate_limiter: ApiRateLimiter,
     deployment_mode: DeploymentMode,
 }
 
 type SharedState = Arc<AppState>;
+
+/// A small in-process token-bucket limiter for public API requests. The
+/// service is one container with one SQLite database, so this protects the
+/// workspace-initialization path without a networked dependency.
+struct ApiRateLimiter {
+    clients: Mutex<HashMap<String, RateLimitBucket>>,
+}
+
+struct RateLimitBucket {
+    updated_at: Instant,
+    available_tokens: f64,
+}
+
+impl ApiRateLimiter {
+    fn new() -> Self {
+        Self {
+            clients: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Allows a steady 20 requests per second with a burst of 40 requests
+    /// from one client before returning the time until its next token.
+    fn check(&self, client: &str) -> Result<(), u64> {
+        let now = Instant::now();
+        let mut clients = self
+            .clients
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        clients.retain(|_, bucket| now.duration_since(bucket.updated_at) < Duration::from_secs(60));
+
+        let bucket = clients.entry(client.to_owned()).or_insert(RateLimitBucket {
+            updated_at: now,
+            available_tokens: f64::from(API_RATE_LIMIT_BURST),
+        });
+        let elapsed = now.duration_since(bucket.updated_at).as_secs_f64();
+        bucket.available_tokens = (bucket.available_tokens
+            + elapsed * f64::from(API_RATE_LIMIT_PER_SECOND))
+        .min(f64::from(API_RATE_LIMIT_BURST));
+        bucket.updated_at = now;
+        if bucket.available_tokens < 1.0 {
+            let wait = Duration::from_secs_f64(
+                (1.0 - bucket.available_tokens) / f64::from(API_RATE_LIMIT_PER_SECOND),
+            );
+            let retry_after = wait
+                .as_secs()
+                .saturating_add(u64::from(wait.subsec_nanos() > 0));
+            return Err(retry_after.max(1));
+        }
+        bucket.available_tokens -= 1.0;
+        Ok(())
+    }
+}
 
 /// A browser-local 256-bit capability. Only its SHA-256 digest is persisted or logged.
 #[derive(Clone)]
@@ -214,6 +276,7 @@ async fn main() {
         Arc::new(AppState {
             db,
             initialization_lock: tokio::sync::Mutex::new(()),
+            rate_limiter: ApiRateLimiter::new(),
             deployment_mode,
         }),
         dist_dir,
@@ -237,8 +300,14 @@ fn app_router(state: SharedState, dist_dir: String) -> Router {
     let index = PathBuf::from(&dist_dir).join("index.html");
     Router::new()
         .route("/health", get(health))
-        .nest("/api", api_router())
-        .fallback_service(ServeDir::new(&dist_dir).not_found_service(ServeFile::new(index)))
+        .nest("/api", api_router(state.clone()))
+        // Legal pages are real public URLs. Serve the application shell with
+        // a 200 so an uncached direct navigation cannot report a false 404.
+        .route_service("/privacy", ServeFile::new(index.clone()))
+        .route_service("/terms", ServeFile::new(index))
+        // Static files receive normal file-server status codes. Unknown paths
+        // stay a real 404 instead of rendering the shell with an error.
+        .fallback_service(ServeDir::new(&dist_dir))
         .with_state(state)
         .layer(from_fn(response_policy))
         .layer(SetResponseHeaderLayer::if_not_present(
@@ -260,7 +329,7 @@ fn app_router(state: SharedState, dist_dir: String) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
-fn api_router() -> Router<SharedState> {
+fn api_router(state: SharedState) -> Router<SharedState> {
     Router::new()
         .route("/runtime", get(runtime))
         .route("/settings", get(get_settings).put(put_settings))
@@ -270,6 +339,47 @@ fn api_router() -> Router<SharedState> {
         .route("/obs/status", get(get_obs_status))
         .route("/obs/test", post(get_obs_status))
         .route("/obs/scene", post(set_scene))
+        .layer(axum::middleware::from_fn_with_state(state, api_rate_limit))
+}
+
+fn client_ip(headers: &axum::http::HeaderMap) -> String {
+    // The factory ingress appends client hops; the first value is the caller.
+    // A directly run local service has no forwarding header, so it uses one
+    // conservative bucket instead of accepting a spoofable identity header.
+    headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("direct-client")
+        .to_owned()
+}
+
+async fn api_rate_limit(
+    State(state): State<SharedState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let client = client_ip(request.headers());
+    if let Err(retry_after) = state.rate_limiter.check(&client) {
+        let mut response = ApiError(
+            StatusCode::TOO_MANY_REQUESTS,
+            format!(
+                "Too many requests from this connection. Wait {retry_after} second{} before trying again.",
+                if retry_after == 1 { "" } else { "s" }
+            ),
+        )
+        .into_response();
+        response.headers_mut().insert(
+            header::RETRY_AFTER,
+            HeaderValue::from_str(&retry_after.to_string())
+                .expect("retry-after is a valid header value"),
+        );
+        return response;
+    }
+    next.run(request).await
 }
 
 async fn response_policy(request: Request<Body>, next: Next) -> Response {
@@ -840,6 +950,7 @@ mod tests {
         Arc::new(AppState {
             db,
             initialization_lock: tokio::sync::Mutex::new(()),
+            rate_limiter: ApiRateLimiter::new(),
             deployment_mode,
         })
     }
@@ -871,9 +982,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_rate_limit_uses_the_first_forwarded_client_and_returns_retry_after() {
+        let state = test_state().await;
+        let app = api_router(state.clone()).with_state(state);
+
+        for _ in 0..API_RATE_LIMIT_BURST {
+            let mut request = request("GET", "/runtime", None, "");
+            request.headers_mut().insert(
+                "x-forwarded-for",
+                HeaderValue::from_static("198.51.100.24, 10.0.0.4"),
+            );
+            let response = app.clone().oneshot(request).await.expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        let mut limited_request = request("GET", "/runtime", None, "");
+        limited_request.headers_mut().insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("198.51.100.24, 10.0.0.9"),
+        );
+        let limited_response = app
+            .clone()
+            .oneshot(limited_request)
+            .await
+            .expect("limited response");
+        assert_eq!(limited_response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            limited_response
+                .headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("1")
+        );
+
+        let mut other_client_request = request("GET", "/runtime", None, "");
+        other_client_request.headers_mut().insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("198.51.100.25, 10.0.0.9"),
+        );
+        let other_client_response = app
+            .oneshot(other_client_request)
+            .await
+            .expect("other client response");
+        assert_eq!(other_client_response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn legal_routes_return_the_application_shell_at_200_and_unknown_paths_are_404() {
+        let static_dir = tempfile::tempdir().expect("temporary static directory");
+        std::fs::write(
+            static_dir.path().join("index.html"),
+            "<!doctype html><html><body><div id=\"app\">legal shell</div></body></html>",
+        )
+        .expect("write application shell");
+        let app = app_router(
+            test_state().await,
+            static_dir.path().to_string_lossy().into_owned(),
+        );
+
+        for path in ["/privacy", "/terms"] {
+            let response = app
+                .clone()
+                .oneshot(request("GET", path, None, ""))
+                .await
+                .expect("legal response");
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            let body = String::from_utf8(
+                to_bytes(response.into_body(), 1024 * 1024)
+                    .await
+                    .expect("legal body")
+                    .to_vec(),
+            )
+            .expect("utf8 legal shell");
+            assert!(body.contains("legal shell"), "{path}");
+        }
+
+        let response = app
+            .oneshot(request("GET", "/not-a-real-route", None, ""))
+            .await
+            .expect("unknown route response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn anonymous_requests_are_rejected_and_operator_data_isolated() {
         let state = test_state().await;
-        let app = api_router().with_state(state);
+        let app = api_router(state.clone()).with_state(state);
         let first = "a".repeat(43);
         let second = "b".repeat(43);
         let response = app
@@ -963,7 +1157,7 @@ mod tests {
     #[tokio::test]
     async fn duplicate_checklist_ids_return_400_without_replacing_saved_items() {
         let state = test_state().await;
-        let app = api_router().with_state(state);
+        let app = api_router(state.clone()).with_state(state);
         let key = "c".repeat(43);
         let response = app.clone().oneshot(request("PUT", "/checklist", Some(&key), r#"[{"id":"same","text":"One","done":false},{"id":"same","text":"Two","done":false}]"#)).await.expect("response");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -989,7 +1183,7 @@ mod tests {
     #[tokio::test]
     async fn hosted_mode_never_stores_or_connects_obs_credentials() {
         let state = test_state_for(DeploymentMode::Hosted).await;
-        let app = api_router().with_state(state);
+        let app = api_router(state.clone()).with_state(state);
         let key = "h".repeat(43);
 
         let runtime_response = app

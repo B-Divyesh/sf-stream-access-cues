@@ -20,7 +20,10 @@ cleanup() {
 trap cleanup EXIT
 
 grep -q '^ARG BUILD_SHA=dev$' "$BUILD_ID_TEST_ROOT/Dockerfile"
-[[ "$(grep -c '^ARG BUILD_SHA$' "$BUILD_ID_TEST_ROOT/Dockerfile")" -eq 4 ]]
+# One global declaration supplies the local default, then each of the three
+# Docker stages redeclares it before using the factory-supplied identity.
+[[ "$(grep -c '^ARG BUILD_SHA$' "$BUILD_ID_TEST_ROOT/Dockerfile")" -eq 3 ]]
+grep -q '^FROM rust:1-slim AS server$' "$BUILD_ID_TEST_ROOT/Dockerfile"
 grep -q '^LABEL org.opencontainers.image.revision=\$BUILD_SHA$' "$BUILD_ID_TEST_ROOT/Dockerfile"
 ! rg -q 'Command::new\("git"\)|execFileSync\(.git|COPY[[:space:]]+\.git|git[[:space:]]+rev-parse' \
   "$BUILD_ID_TEST_ROOT/Dockerfile" "$BUILD_ID_TEST_ROOT/build.rs" "$BUILD_ID_TEST_ROOT/vite.config.ts"

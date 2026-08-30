@@ -27,6 +27,8 @@ The Vite UI runs at `http://localhost:5173` and proxies local API requests to th
 
 The service stores its SQLite database under `./data` by default. Change that with `DATA_DIR`. Each browser creates a random 256-bit workspace key in its own local storage. The API stores only the SHA-256 digest of that key and uses it to scope settings, cues, checklist items, links, and OBS actions. A request without that key is rejected; another browser cannot read or overwrite the workspace.
 
+All public API routes are IP-rate-limited to 20 requests per second with a burst of 40. Requests above the burst receive `429 Too Many Requests` with `Retry-After`; `/health` remains available for platform health checks.
+
 Other configuration:
 
 | Variable | Default | Purpose |

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { api, operatorKey, type ChecklistItem, type Cue, type ObsStatus, type PlatformLink, type Runtime, type Settings } from './api';
+  import { api, browserWorkspace, operatorKey, resetBrowserWorkspace, type ChecklistItem, type Cue, type ObsStatus, type PlatformLink, type Runtime, type Settings, type WorkspaceApi } from './api';
   import { formatDuration, isEditableTarget, makeId, timerMilliseconds, type TimerState } from './utils';
 
   const path = window.location.pathname.replace(/\/$/, '') || '/';
   const staticPage = path === '/privacy' ? 'privacy' : path === '/terms' ? 'terms' : null;
+  const demo = path === '/demo' || new URLSearchParams(window.location.search).get('demo') === '1';
   let loading = true;
   let serviceError = '';
   let actionError = '';
@@ -21,7 +22,8 @@
   let now = Date.now();
   let timer: TimerState = { elapsed: 0, startedAt: null, running: false };
   let timerText = '00:00:00';
-  const timerStorageKey = `stream-access-cues.timer.${operatorKey()}`;
+  const timerStorageKey = demo ? 'demo:stream-access-cues.timer.v1' : `stream-access-cues.timer.${operatorKey()}`;
+  let workspace: WorkspaceApi = api;
 
   let settingsDialog: HTMLDialogElement;
   let checklistDialog: HTMLDialogElement;
@@ -61,16 +63,31 @@
   async function loadAll() {
     loading = true;
     serviceError = '';
-    const results = await Promise.allSettled([api.runtime(), api.settings(), api.checklist(), api.cues(), api.links()]);
+    if (demo) {
+      // The demo is deliberately browser-only so it is isolated from both a
+      // visitor's local service and the public factory deployment.
+      runtime = { build_sha: '', deployment_mode: 'hosted', obs_control_available: false };
+      obs = { connected: true, message: 'Sample cues are simulated in the demo.', scenes: ['Starting Soon', 'Camera + Game', 'Be Right Back'], current_scene: 'Starting Soon' };
+      workspace = browserWorkspace('demo');
+    } else {
+      try {
+        runtime = await api.runtime();
+        workspace = runtime.obs_control_available ? api : browserWorkspace('hosted');
+      } catch (error) {
+        serviceError = errorMessage(error);
+        loading = false;
+        return;
+      }
+    }
+    const results = await Promise.allSettled([workspace.settings(), workspace.checklist(), workspace.cues(), workspace.links()]);
     const failed = results.find((result) => result.status === 'rejected');
     if (failed?.status === 'rejected') serviceError = errorMessage(failed.reason);
-    if (results[0].status === 'fulfilled') runtime = results[0].value;
-    if (results[1].status === 'fulfilled') settings = results[1].value;
-    if (results[2].status === 'fulfilled') checklist = results[2].value;
-    if (results[3].status === 'fulfilled') cues = results[3].value;
-    if (results[4].status === 'fulfilled') links = results[4].value;
+    if (results[0].status === 'fulfilled') settings = results[0].value;
+    if (results[1].status === 'fulfilled') checklist = results[1].value;
+    if (results[2].status === 'fulfilled') cues = results[2].value;
+    if (results[3].status === 'fulfilled') links = results[3].value;
     loading = false;
-    if (runtime.obs_control_available && settings.configured) refreshObs(false);
+    if (!demo && runtime.obs_control_available && settings.configured) refreshObs(false);
   }
 
   async function refreshObs(announceResult = true) {
@@ -88,6 +105,11 @@
   }
 
   async function triggerCue(cue: Cue) {
+    if (demo) {
+      obs = { ...obs, current_scene: cue.scene_name, message: `Sample cue changed to ${cue.scene_name}.` };
+      say(`${cue.label}: sample cue changed to ${cue.scene_name}.`, true);
+      return;
+    }
     if (!runtime.obs_control_available) {
       localSetupDialog.showModal();
       say('Scene control needs the local Stream Access Cues service.');
@@ -110,7 +132,7 @@
     const changed = checklist.find((candidate) => candidate.id === item.id)!;
     say(`${changed.text}, marked ${changed.done ? 'complete' : 'not complete'}.`);
     try {
-      checklist = await api.saveChecklist(checklist);
+      checklist = await workspace.saveChecklist(checklist);
     } catch (error) {
       checklist = previous;
       actionError = `${errorMessage(error)} Your checklist change was not saved.`;
@@ -175,7 +197,7 @@
     saving = true;
     settingsError = '';
     try {
-      settings = await api.saveSettings({
+      settings = await workspace.saveSettings({
         obs_host: settingsHost,
         obs_port: Number(settingsPort),
         ...(settingsPassword || clearPassword ? { obs_password: clearPassword ? '' : settingsPassword } : {})
@@ -198,7 +220,7 @@
     saving = true;
     actionError = '';
     try {
-      checklist = await api.saveChecklist(editChecklist);
+      checklist = await workspace.saveChecklist(editChecklist);
       checklistDialog.close();
       say(`Checklist saved with ${checklist.length} items.`);
     } catch (error) { editorError = errorMessage(error); }
@@ -215,7 +237,7 @@
     saving = true;
     actionError = '';
     try {
-      cues = await api.saveCues(editCues);
+      cues = await workspace.saveCues(editCues);
       cuesDialog.close();
       say(`${cues.length} scene cues saved.`);
     } catch (error) { editorError = errorMessage(error); }
@@ -232,7 +254,7 @@
     saving = true;
     actionError = '';
     try {
-      links = await api.saveLinks(editLinks);
+      links = await workspace.saveLinks(editLinks);
       linksDialog.close();
       say(`${links.length} metadata links saved.`);
     } catch (error) { editorError = errorMessage(error); }
@@ -256,15 +278,33 @@
     else if (key === 's') { event.preventDefault(); speakStatus(); }
   }
 
+  async function resetDemo() {
+    resetBrowserWorkspace('demo');
+    localStorage.removeItem(timerStorageKey);
+    timer = { elapsed: 0, startedAt: null, running: false };
+    await loadAll();
+    say('Demo reset to its sample stream plan.');
+  }
+
+  function leaveDemo() {
+    resetBrowserWorkspace('demo');
+    localStorage.removeItem('demo:stream-access-cues.timer.v1');
+  }
+
   onMount(() => {
+    const pageTitle = staticPage === 'privacy' ? 'Privacy — Stream Access Cues' : staticPage === 'terms' ? 'Terms — Stream Access Cues' : demo ? 'Demo — Stream Access Cues' : 'Stream Access Cues — local OBS control surface';
+    document.title = pageTitle;
+    const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (canonical) canonical.href = new URL(staticPage ? `/${staticPage}` : demo ? '/demo' : '/', window.location.origin).href;
     if (!staticPage) loadAll(); else loading = false;
+    if (!demo) resetBrowserWorkspace('demo');
     try {
       const stored = localStorage.getItem(timerStorageKey);
       if (stored) timer = JSON.parse(stored) as TimerState;
     } catch { localStorage.removeItem(timerStorageKey); }
     const interval = window.setInterval(() => { now = Date.now(); }, 500);
     const onOnline = () => { online = true; say('Browser is online.'); };
-    const onOffline = () => { online = false; say('Browser is offline. Local controls remain available; external metadata pages will not open.'); };
+    const onOffline = () => { online = false; say(demo ? 'Browser is offline. The sample workspace remains available.' : 'Browser is offline. Reconnect to use your local service or metadata pages.'); };
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     window.addEventListener('keydown', keyboard);
@@ -286,8 +326,13 @@
   </a>
   {#if !staticPage}
     <nav aria-label="Utility navigation">
+      {#if demo}
+        <a href="/" onclick={leaveDemo}>Start for real</a>
+      {:else}
+        <a href="/demo">Try sample</a>
+      {/if}
       <button class="quiet-button" type="button" onclick={() => shortcutsDialog.showModal()} aria-keyshortcuts="?">Shortcuts <kbd>?</kbd></button>
-      <button class="quiet-button" type="button" onclick={openSettings}>{runtime.obs_control_available ? 'Connection' : 'Run locally'}</button>
+      {#if !demo}<button class="quiet-button" type="button" onclick={openSettings}>{runtime.obs_control_available ? 'Connection' : 'Run locally'}</button>{/if}
     </nav>
   {:else}
     <nav aria-label="Utility navigation"><a href="/">Return to cue surface</a></nav>
@@ -295,7 +340,14 @@
 </header>
 
 {#if !online}
-  <div class="offline-banner" role="status"><strong>Browser offline.</strong> Saved controls still work; metadata pages need an internet connection.</div>
+  <div class="offline-banner" role="status"><strong>Browser offline.</strong> {demo ? 'The sample workspace remains available.' : 'Reconnect to use your local service or metadata pages.'}</div>
+{/if}
+
+{#if demo}
+  <aside class="demo-banner" aria-label="Demo status">
+    <span><strong>Demo — sample data, nothing is saved.</strong> Scene cues are previews and never contact OBS.</span>
+    <span class="demo-actions"><button type="button" class="quiet-button" onclick={resetDemo}>Reset demo</button><a href="/" onclick={leaveDemo}>Start for real</a></span>
+  </aside>
 {/if}
 
 <main id="main">
@@ -305,11 +357,11 @@
       <h1>Privacy</h1>
       <p class="lede">Stream Access Cues is local-first: it has no accounts, analytics, advertising, tracking pixels, or third-party scripts.</p>
       <h2>What is stored</h2>
-      <p>When you run the local service, its workspace stores an OBS host, port and optional WebSocket password, checklist, scene cue names, and metadata links. The browser keeps a random private workspace key and its session timer; the service stores only a hash of that key, never the key itself.</p>
+      <p>When you run the local service, its workspace stores an OBS host, port and optional WebSocket password, checklist, scene cue names, and metadata links. The browser keeps a random private workspace key and its session timer. The service stores only a hash of that key, never the key itself.</p>
       <h2>Where it goes</h2>
-      <p>When you run Stream Access Cues yourself, saved data stays in its local SQLite directory and OBS credentials are used only by that local service. The public site is a setup guide: it never accepts OBS credentials or opens an OBS connection. Its optional checklist, cue names, and launch links are isolated by your browser-local private key, so another visitor cannot read or replace them. No data is sent to analytics, advertising, or third-party services. Opening a metadata link takes you to that platform under its privacy policy.</p>
+      <p>When you run Stream Access Cues yourself, saved data stays in its local SQLite directory and OBS credentials are used only by that local service. The public site is a setup guide: it never accepts OBS credentials or opens an OBS connection. Its checklist, cue names, links, and demo sample stay in browser storage and are never sent to the public service. No data is sent to analytics, advertising, or third-party services. Opening a metadata link takes you to that platform under its privacy policy.</p>
       <h2>Remove your data</h2>
-      <p>Edit or remove checklist, cue, and link entries in the app. To remove self-hosted data, stop the service and delete its configured <code>DATA_DIR</code>. Clearing site data removes your browser’s workspace key, timer, and offline shell; because that key cannot be recovered, do this only when you intend to start a new workspace.</p>
+      <p>Edit or remove checklist, cue, and link entries in the app. To remove self-hosted data, stop the service and delete its configured <code>DATA_DIR</code>. Clearing site data removes browser-stored public workspaces, the timer, and the offline shell. It also removes a local-service workspace key, which cannot be recovered.</p>
       <p>Effective 27 August 2026.</p>
     </article>
   {:else if staticPage === 'terms'}
@@ -329,13 +381,16 @@
     <section class="intro" aria-labelledby="page-title">
       <div>
         <p class="eyebrow">Local broadcast control · no account</p>
-        <h1 id="page-title">Your stream, under your fingers.</h1>
-        <p class="lede">Set the next task, change an OBS scene, and keep time—without wrestling an embedded web dock.</p>
+        <h1 id="page-title">Control your stream with a keyboard</h1>
+        <p class="lede">For blind and keyboard-first independent streamers who need spoken preflight steps, scene cues, and a session timer.</p>
+        {#if !demo}<p class="intro-action"><a class="primary-button" href="/demo">Try it with sample data</a><span>Open a safe sample checklist and cue panel.</span></p>{/if}
       </div>
       <div class="system-state" aria-label="System status">
         <span class:lamp-good={obs.connected} class:lamp-warn={!obs.connected} class="status-lamp" aria-hidden="true"></span>
-        <span><strong>{!runtime.obs_control_available ? 'Local control required' : obs.connected ? 'OBS ready' : settings.configured ? 'OBS unavailable' : 'Setup needed'}</strong><small>{!runtime.obs_control_available ? 'This hosted site does not connect to OBS.' : obs.connected ? `Scene: ${obs.current_scene ?? 'unknown'}` : obs.message}</small></span>
-        {#if runtime.obs_control_available}
+        <span><strong>{demo ? 'Sample cue panel' : !runtime.obs_control_available ? 'Local control required' : obs.connected ? 'OBS ready' : settings.configured ? 'OBS unavailable' : 'Setup needed'}</strong><small>{demo ? 'Sample data stays in this browser.' : !runtime.obs_control_available ? 'This hosted site does not connect to OBS.' : obs.connected ? `Scene: ${obs.current_scene ?? 'unknown'}` : obs.message}</small></span>
+        {#if demo}
+          <button type="button" class="text-button" onclick={() => say('Sample cue panel. Choose a cue to hear its simulated result.')}>Explain sample mode</button>
+        {:else if runtime.obs_control_available}
           <button type="button" class="text-button" onclick={() => refreshObs()} disabled={obsChecking || !settings.configured}>{obsChecking ? 'Checking…' : 'Check connection'}</button>
         {:else}
           <button type="button" class="text-button" onclick={() => localSetupDialog.showModal()}>View local setup</button>
@@ -362,7 +417,7 @@
         <span class="meter" aria-hidden="true"></span><p>Warming up your private control surface…</p>
       </section>
     {:else}
-      {#if !runtime.obs_control_available || !settings.configured}
+      {#if !demo && (!runtime.obs_control_available || !settings.configured)}
         <section class="onboarding" aria-labelledby="onboarding-title">
           <div class="onboarding-copy">
             <p class="panel-number">Start here · 01</p>
@@ -370,11 +425,11 @@
             {#if runtime.obs_control_available}
               <p>Enable the WebSocket server in OBS under <strong>Tools → WebSocket Server Settings</strong>. Then save the local host, port, and optional password here.</p>
               <button class="primary-button" type="button" onclick={openSettings}>Configure OBS connection</button>
-              <p class="privacy-note">Your saved controls belong to this browser’s private workspace key. Other visitors cannot read or replace them.</p>
+              <p class="privacy-note">Your local service stores workspace data in its SQLite folder. The browser keeps only its private workspace key.</p>
             {:else}
               <p>This public guide never reaches into your computer. Run the local container on the computer that runs OBS, then open its local address to change scenes with your keyboard.</p>
               <button class="primary-button" type="button" onclick={() => localSetupDialog.showModal()}>View local setup</button>
-              <p class="privacy-note">Do not expose the OBS WebSocket to the internet. The local service keeps its OBS password on your machine.</p>
+              <p class="privacy-note">Checklist and link edits on this public guide stay in this browser. Do not expose the OBS WebSocket to the internet.</p>
             {/if}
           </div>
           <picture>
@@ -428,19 +483,20 @@
         <section class="panel cues-panel" aria-labelledby="cues-heading">
           <div class="panel-heading">
             <div><p class="panel-number">Scenes · C</p><h2 id="cues-heading">Scene cues</h2></div>
-            <button type="button" class="quiet-button" onclick={runtime.obs_control_available ? openCuesEditor : () => localSetupDialog.showModal()}>{runtime.obs_control_available ? 'Assign' : 'Run locally'}</button>
+            <button type="button" class="quiet-button" onclick={demo || runtime.obs_control_available ? openCuesEditor : () => localSetupDialog.showModal()}>{demo || runtime.obs_control_available ? 'Assign' : 'Run locally'}</button>
           </div>
           {#if cues.length}
             <div class="cue-grid">
               {#each cues as cue, index (cue.id)}
-                <button type="button" class="cue-key" onclick={() => triggerCue(cue)} disabled={!runtime.obs_control_available || !obs.connected} aria-keyshortcuts={`Control+Shift+${index + 1} Meta+Shift+${index + 1}`}>
+                <button type="button" class="cue-key" onclick={() => triggerCue(cue)} disabled={!demo && (!runtime.obs_control_available || !obs.connected)} aria-keyshortcuts={`Control+Shift+${index + 1} Meta+Shift+${index + 1}`}>
                   <span class="key-number" aria-hidden="true">{index + 1}</span>
                   <strong>{cue.label}</strong>
                   <small>Scene: {cue.scene_name}</small>
                 </button>
               {/each}
             </div>
-            {#if !runtime.obs_control_available}<p class="inline-note">Scene control is deliberately disabled on this hosted site. Run the local service beside OBS to use these assignments.</p>
+            {#if demo}<p class="inline-note">These scene keys are safe previews in the demo. They never contact OBS.</p>
+            {:else if !runtime.obs_control_available}<p class="inline-note">Scene control is deliberately disabled on this hosted site. Run the local service beside OBS to use these assignments.</p>
             {:else if !obs.connected}<p class="inline-note">Scene keys are held until OBS connects. Your assignments are saved.</p>{/if}
           {:else}
             <div class="empty-state"><strong>No scene cues assigned.</strong><p>{!runtime.obs_control_available ? 'Run the local service to assign and trigger scene keys.' : obs.connected ? 'Choose from the scenes read from OBS.' : 'Connect OBS, then assign up to nine scene keys.'}</p><button type="button" onclick={runtime.obs_control_available ? openCuesEditor : () => localSetupDialog.showModal()}>{runtime.obs_control_available ? 'Assign scene cues' : 'View local setup'}</button></div>
@@ -469,7 +525,7 @@
 <footer>
   <p>Local-first, free, and built for independent control.</p>
   <nav aria-label="Legal"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/B-Divyesh/sf-stream-access-cues" rel="noreferrer">Source code</a></nav>
-  <p class="disclosure">Onboarding illustration generated with the Factory image model; no people or brands depicted.</p>
+  <p class="disclosure">Built by Param Factory · build {runtime.build_sha || (demo ? 'demo' : 'local')} · Onboarding illustration generated with the Factory image model; no people or brands depicted.</p>
 </footer>
 
 <dialog bind:this={settingsDialog} aria-labelledby="settings-title">

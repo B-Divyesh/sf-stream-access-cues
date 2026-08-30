@@ -1,78 +1,77 @@
 # Stream Access Cues
 
-Stream Access Cues is a local-first, keyboard and screen-reader-friendly control surface for independent streamers. It connects to OBS WebSocket for named scene changes, keeps a spoken preflight checklist and session timer, and opens the platform-owned pages where stream metadata can actually be edited.
+Control an OBS stream with a keyboard. Stream Access Cues is for blind and keyboard-first independent streamers who need spoken preflight steps, named scene cues, a session timer, and direct links to their platform’s metadata page.
 
-It does **not** stream video, replace OBS, write Twitch/YouTube metadata, or store OAuth tokens. There are no accounts, analytics, third-party scripts, or paid features.
+It is a Rust/Axum container that serves a Vite/Svelte interface on port 8080. Local mode is the product: it runs beside OBS and is the only mode allowed to save an OBS password or contact OBS WebSocket. The public site is a safe setup guide and sample workspace.
 
-## Who it is for
+## Try the sample
 
-The primary user is a blind or keyboard-first solo streamer who cannot reliably use inaccessible embedded browser docks. The whole live surface is operable with native controls, announced state, and documented shortcuts.
+Open [the demo](/demo) or select **Try it with sample data** on the first screen. It loads a Friday community-stream checklist, three simulated scene cues, and platform links. The persistent banner says **Demo — sample data, nothing is saved**.
 
-## Requirements
+The demo uses only the `demo:stream-access-cues.*` browser-storage namespace. **Reset demo** restores the bundled sample. **Start for real** discards it. The sample dashboard reloads offline after its first visit. Sample scene keys are previews; they never contact OBS.
 
-- Node.js 22+ and npm
-- Rust 1.88+ for the local service
-- OBS 28+ with its WebSocket server enabled under **Tools → WebSocket Server Settings**
-- Docker 24+ for the production container path
+On the public hosted guide, checklist, cue, and link edits stay in the current browser’s `stream-access-cues.hosted.workspace.v1` storage. The public service rejects all workspace writes, so a scaled container cannot split or lose that data. It also never contacts an OBS endpoint.
 
-## Run locally
+## Run the local companion
 
-```bash
-npm install
-npm run build
-npm run dev
-```
-
-The Vite UI runs at `http://localhost:5173` and proxies local API requests to the Rust service on port 8080. `npm run build` reproducibly writes the static frontend to `dist/`, with `dist/index.html` at its root.
-
-The service stores its SQLite database under `./data` by default. Change that with `DATA_DIR`. Each browser creates a random 256-bit workspace key in its own local storage. The API stores only the SHA-256 digest of that key and uses it to scope settings, cues, checklist items, links, and OBS actions. A request without that key is rejected; another browser cannot read or overwrite the workspace.
-
-All public API routes are IP-rate-limited to 20 requests per second with a burst of 40. Requests above the burst receive `429 Too Many Requests` with `Retry-After`; `/health` remains available for platform health checks.
-
-Other configuration:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PORT` | `8080` | HTTP listen port |
-| `DATA_DIR` | `data` | SQLite persistence directory |
-| `DIST_DIR` | `dist` | Built frontend directory |
-| `RUST_LOG` | service info logs | Structured log filter |
-| `BUILD_SHA` | checked-out Git SHA | Immutable value returned by `/health` |
-| `DEPLOYMENT_MODE` | `local` outside Docker; `hosted` in the image | `local` is the only mode allowed to save OBS credentials or open OBS WebSocket connections. |
-
-## Test and check
+Requirements: Node.js 22+, Rust 1.88+, and OBS 28+ with **Tools → WebSocket Server Settings** enabled.
 
 ```bash
-npm test
-npm run check
+npm ci
 npm run build
+DEPLOYMENT_MODE=local cargo run
 ```
 
-The test command runs frontend unit tests and Rust tests. The check command runs Svelte/TypeScript diagnostics and strict Rust Clippy.
+Open `http://localhost:8080`, choose **Connection**, then enter the local OBS host, port, and optional password. Local mode stores its SQLite file under `./data` by default; set `DATA_DIR` to choose another durable local directory. Each browser has a random private workspace key; the service stores only its SHA-256 digest.
 
-## Production container
+For the production container path:
 
 ```bash
 docker build --build-arg BUILD_SHA="$(git rev-parse HEAD)" -t stream-access-cues .
 docker run --rm -p 8080:8080 -v stream-access-cues-data:/app/data -e DEPLOYMENT_MODE=local stream-access-cues
 ```
 
-Open `http://localhost:8080`. This explicit local mode is the supported way to control OBS: it runs the service beside the operator’s OBS instance and keeps its OBS password in the local volume. When OBS runs on the Docker host, use `host.docker.internal` on Docker Desktop. On Linux, add `--add-host=host.docker.internal:host-gateway` or use a host network appropriate to your environment.
+Do not expose an OBS WebSocket publicly. The image defaults to hosted-guide mode, so `DEPLOYMENT_MODE=local` is required when the container runs beside OBS.
 
-The image accepts `BUILD_SHA` and defaults it to `dev` for local builds; the factory always supplies the complete checked-out commit SHA and the image records it in both the compiled service and its OCI revision label. It defaults to `DEPLOYMENT_MODE=hosted` for the public factory deployment. Hosted mode is an accessible setup guide only: it refuses OBS credential writes and all OBS network requests, because `127.0.0.1` on a public container is not the streamer’s computer. It still offers the independently isolated checklist and launch-link workspace, but it cannot change scenes. Never expose the OBS WebSocket publicly.
+## Keyboard controls
 
-## Keyboard map
-
-- Control/Command + Shift + 1–9: trigger scene cues
+- Control/Command + Shift + 1–9: trigger the matching scene cue (or preview it in the demo)
 - Control/Command + Shift + T: start or pause the timer
-- Control/Command + Shift + R: confirm timer reset
-- Control/Command + Shift + C: focus the next incomplete checklist item
-- Control/Command + Shift + S: speak current scene, time, and next item
+- Control/Command + Shift + R: open timer reset confirmation
+- Control/Command + Shift + C: focus the next incomplete item
+- Control/Command + Shift + S: speak scene, timer, and next item
 - `?`: open the shortcut guide outside text fields
 
-## Privacy and deployment
+Keyboard shortcuts start the timer, preview sample cues, and open the shortcut guide.
 
-When self-hosted, the service and SQLite data remain on the operator’s machine. The public setup guide never accepts OBS credentials or contacts an OBS endpoint. Its optional checklist and links are isolated behind the browser-local private workspace key described above; they are never shared between visitors and the raw key is never persisted by the server. The browser also stores the timer and a release-versioned offline shell cache. See `/privacy` and `/terms` in the running app. The factory owns deployment, DNS, and infrastructure; this repository contains no deployment credentials.
+## Privacy and limits
+
+There are no accounts, analytics, advertising, tracking pixels, third-party scripts, or paid features. The public guide’s sample and workspace data remain in browser storage. In local mode, your data and OBS password remain in the local SQLite directory. See `/privacy` and `/terms` in the running app.
+
+All public API routes are limited to 20 requests/second with a burst of 40 per first forwarded client IP. The next over-limit request receives `429 Too Many Requests` and `Retry-After`; `/health` is exempt.
+
+## Verify
+
+```bash
+npm test
+npm run check
+npm run build
+npm run build:server
+npm run test:claims -- --grep @claim:demo-sample-isolated
+npm run test:e2e
+```
+
+The claim registry is [`.factory/claims.json`](.factory/claims.json). It records an executable browser or integration test for each user-facing promise. `npm run test:e2e` runs Chromium at desktop and 390px, including keyboard, Axe, service-worker update, offline, hosted-boundary, and mobile checks.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `8080` | HTTP listen port |
+| `DATA_DIR` | `data` | Local SQLite directory |
+| `DIST_DIR` | `dist` | Built frontend directory |
+| `BUILD_SHA` | `dev` | Value returned by `/health` |
+| `DEPLOYMENT_MODE` | `local` outside Docker | `local` enables local OBS and SQLite workspaces; `hosted` is browser-local guide mode |
 
 ## License
 

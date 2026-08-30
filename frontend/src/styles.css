@@ -55,6 +55,10 @@ button:disabled { opacity: .52; cursor: not-allowed; }
 .quiet-button { min-height: 44px; padding: 7px 12px; border-color: transparent; border-bottom-color: transparent; background: transparent; }
 kbd { display: inline-block; min-width: 24px; padding: 2px 6px; border: 1px solid #8d927e; border-bottom: 2px solid #8d927e; border-radius: 3px; color: var(--paper); background: var(--well); font: 700 13px ui-monospace, monospace; text-align: center; }
 .offline-banner { padding: 10px 24px; color: var(--amber-ink); background: var(--warning); text-align: center; }
+.demo-banner { min-height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px max(24px, calc((100vw - 1240px) / 2)); border-bottom: 1px solid #ffd06f; color: var(--amber-ink); background: #f5c45f; font-size: 15px; }
+.demo-actions { display: flex; align-items: center; gap: 12px; flex: none; }
+.demo-actions .quiet-button { min-height: 40px; color: var(--amber-ink); }
+.demo-actions a { min-height: 40px; display: inline-flex; align-items: center; color: var(--amber-ink); font-weight: 800; }
 
 main { width: min(1240px, calc(100% - 48px)); margin: 0 auto; padding: 56px 0 80px; }
 .intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); gap: 48px; align-items: end; margin-bottom: 32px; }
@@ -63,6 +67,8 @@ h1, h2 { font-family: Georgia, "Times New Roman", serif; line-height: 1.06; text
 h1 { max-width: 800px; margin: 0; font-size: clamp(38px, 6vw, 70px); letter-spacing: -.035em; }
 h2 { margin: 0; font-size: clamp(23px, 3vw, 30px); letter-spacing: -.015em; }
 .lede { max-width: 680px; margin: 18px 0 0; color: var(--muted); font-size: clamp(18px, 2vw, 21px); line-height: 1.5; }
+.intro-action { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin: 24px 0 0; color: var(--muted); }
+.intro-action .primary-button { min-height: 48px; display: inline-flex; align-items: center; text-decoration: none; }
 .system-state { min-height: 104px; display: grid; grid-template-columns: 22px 1fr; gap: 4px 12px; align-items: center; padding: 18px; border: 1px solid var(--rule); border-radius: 4px; background: var(--well); box-shadow: inset 0 0 0 3px #080907; }
 .system-state span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; }
 .system-state small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
@@ -184,6 +190,8 @@ dialog small { display: block; margin-top: 4px; color: var(--muted); }
   .site-header nav { gap: 2px; }
   .site-header .quiet-button { padding: 6px 8px; font-size: 14px; }
   .site-header kbd { display: none; }
+  .demo-banner { align-items: flex-start; flex-direction: column; padding: 10px 16px; }
+  .demo-actions { width: 100%; justify-content: space-between; }
   main { width: min(100% - 24px, 1240px); padding: 36px 0 56px; }
   h1 { font-size: 38px; }
   .intro { margin-bottom: 20px; }

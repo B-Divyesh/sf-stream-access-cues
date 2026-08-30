@@ -1,0 +1,62 @@
+[
+  {
+    "id": "demo-sample-isolated",
+    "claim": "Try it with sample data opens a safe sample checklist and cue panel without saving to the service.",
+    "where": "Landing primary action and demo banner",
+    "test": "npm run test:claims -- --grep @claim:demo-sample-isolated"
+  },
+  {
+    "id": "demo-reset",
+    "claim": "Reset demo restores the bundled sample, and Start for real discards it.",
+    "where": "Demo banner",
+    "test": "npm run test:claims -- --grep @claim:demo-reset"
+  },
+  {
+    "id": "demo-offline-reload",
+    "claim": "The sample dashboard reloads offline after its first visit.",
+    "where": "README and demo experience",
+    "test": "npm run test:claims -- --grep @claim:demo-offline-reload"
+  },
+  {
+    "id": "keyboard-shortcuts",
+    "claim": "Keyboard shortcuts start the timer, preview sample cues, and open the shortcut guide.",
+    "where": "Shortcut guide and README",
+    "test": "npm run test:claims -- --grep @claim:keyboard-shortcuts"
+  },
+  {
+    "id": "hosted-workspace-stays-in-browser",
+    "claim": "Checklist and link edits on the public guide stay in this browser.",
+    "where": "Hosted onboarding and Privacy page",
+    "test": "npx playwright test --config=playwright.hosted.config.ts --grep @claim:hosted-workspace-stays-in-browser"
+  },
+  {
+    "id": "hosted-guide-never-connects-obs",
+    "claim": "The public guide never connects to OBS.",
+    "where": "Hosted onboarding and Privacy page",
+    "test": "npx playwright test --config=playwright.hosted.config.ts --grep @claim:hosted-guide-never-connects-obs"
+  },
+  {
+    "id": "privacy-no-third-parties",
+    "claim": "The demo starts without an account and does not make third-party requests.",
+    "where": "Privacy page and README",
+    "test": "npm run test:claims -- --grep @claim:privacy-no-third-parties"
+  },
+  {
+    "id": "local-workspace-persistence",
+    "claim": "The local service keeps a checklist change after reload.",
+    "where": "README local companion instructions",
+    "test": "npm run test:claims -- --grep @claim:local-workspace-persistence"
+  },
+  {
+    "id": "rate-limit",
+    "claim": "Over-limit public API responses include 429 and Retry-After.",
+    "where": "README Privacy and limits",
+    "test": "npm run test:claims -- --grep @claim:rate-limit"
+  },
+  {
+    "id": "sample-cues-never-contact-obs",
+    "claim": "Sample scene keys are previews; they never contact OBS.",
+    "where": "README and demo banner",
+    "test": "npm run test:claims -- --grep @claim:sample-cues-never-contact-obs"
+  }
+]

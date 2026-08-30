@@ -11,6 +11,7 @@
     "build:server": "cargo build --release",
     "test": "vitest run && cargo test && npm run test:build-identity",
     "test:build-identity": "bash tests/build-identity.sh",
+    "test:claims": "playwright test tests/browser/claims.spec.ts",
     "test:e2e": "playwright test && playwright test --config=playwright.hosted.config.ts",
     "check": "svelte-check --tsconfig ./tsconfig.json && cargo clippy --all-targets -- -D warnings"
   },

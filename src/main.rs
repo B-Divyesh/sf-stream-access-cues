@@ -301,8 +301,9 @@ fn app_router(state: SharedState, dist_dir: String) -> Router {
     Router::new()
         .route("/health", get(health))
         .nest("/api", api_router(state.clone()))
-        // Legal pages are real public URLs. Serve the application shell with
-        // a 200 so an uncached direct navigation cannot report a false 404.
+        // App pages are real public URLs. Serve the application shell with a
+        // 200 so an uncached direct navigation cannot report a false 404.
+        .route_service("/demo", ServeFile::new(index.clone()))
         .route_service("/privacy", ServeFile::new(index.clone()))
         .route_service("/terms", ServeFile::new(index))
         // Static files receive normal file-server status codes. Unknown paths
@@ -543,14 +544,7 @@ async fn get_settings(
     State(state): State<SharedState>,
     operator: Operator,
 ) -> Result<Json<SettingsResponse>, ApiError> {
-    if !state.deployment_mode.allows_obs_control() {
-        return Ok(Json(SettingsResponse {
-            obs_host: "127.0.0.1".into(),
-            obs_port: 4455,
-            configured: false,
-            password_saved: false,
-        }));
-    }
+    require_local_workspace(&state)?;
     ensure_operator(&state, &operator.0).await?;
     settings_response(&state.db, &operator.0).await
 }
@@ -631,10 +625,24 @@ fn require_local_obs(state: &AppState) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Hosted guide instances can scale independently and are never a durable
+/// workspace boundary. Browser-local storage is used there instead; only a
+/// local companion may accept or return workspace data.
+fn require_local_workspace(state: &AppState) -> Result<(), ApiError> {
+    if !state.deployment_mode.allows_obs_control() {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "The hosted guide does not store workspace data. Use the browser-local checklist and links here, or run the local Stream Access Cues service beside OBS.".into(),
+        ));
+    }
+    Ok(())
+}
+
 async fn get_checklist(
     State(state): State<SharedState>,
     operator: Operator,
 ) -> Result<Json<Vec<ChecklistItem>>, ApiError> {
+    require_local_workspace(&state)?;
     ensure_operator(&state, &operator.0).await?;
     checklist_response(&state.db, &operator.0).await
 }
@@ -665,6 +673,7 @@ async fn put_checklist(
     operator: Operator,
     Json(items): Json<Vec<ChecklistItem>>,
 ) -> Result<Json<Vec<ChecklistItem>>, ApiError> {
+    require_local_workspace(&state)?;
     if items.len() > 50 {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,
@@ -697,6 +706,7 @@ async fn get_cues(
     State(state): State<SharedState>,
     operator: Operator,
 ) -> Result<Json<Vec<Cue>>, ApiError> {
+    require_local_workspace(&state)?;
     ensure_operator(&state, &operator.0).await?;
     cues_response(&state.db, &operator.0).await
 }
@@ -724,6 +734,7 @@ async fn put_cues(
     operator: Operator,
     Json(cues): Json<Vec<Cue>>,
 ) -> Result<Json<Vec<Cue>>, ApiError> {
+    require_local_workspace(&state)?;
     if cues.len() > 9 {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,
@@ -757,6 +768,7 @@ async fn get_links(
     State(state): State<SharedState>,
     operator: Operator,
 ) -> Result<Json<Vec<PlatformLink>>, ApiError> {
+    require_local_workspace(&state)?;
     ensure_operator(&state, &operator.0).await?;
     links_response(&state.db, &operator.0).await
 }
@@ -783,6 +795,7 @@ async fn put_links(
     operator: Operator,
     Json(links): Json<Vec<PlatformLink>>,
 ) -> Result<Json<Vec<PlatformLink>>, ApiError> {
+    require_local_workspace(&state)?;
     if links.len() > 8 {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,
@@ -1028,19 +1041,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legal_routes_return_the_application_shell_at_200_and_unknown_paths_are_404() {
+    async fn app_routes_return_the_application_shell_at_200_and_unknown_paths_are_404() {
         let static_dir = tempfile::tempdir().expect("temporary static directory");
         std::fs::write(
             static_dir.path().join("index.html"),
             "<!doctype html><html><body><div id=\"app\">legal shell</div></body></html>",
         )
         .expect("write application shell");
+        std::fs::write(static_dir.path().join("robots.txt"), "User-agent: *\nAllow: /\n")
+            .expect("write robots file");
+        std::fs::write(
+            static_dir.path().join("sitemap.xml"),
+            "<?xml version=\"1.0\"?><urlset></urlset>",
+        )
+        .expect("write sitemap file");
         let app = app_router(
             test_state().await,
             static_dir.path().to_string_lossy().into_owned(),
         );
 
-        for path in ["/privacy", "/terms"] {
+        for path in ["/demo", "/privacy", "/terms"] {
             let response = app
                 .clone()
                 .oneshot(request("GET", path, None, ""))
@@ -1055,6 +1075,15 @@ mod tests {
             )
             .expect("utf8 legal shell");
             assert!(body.contains("legal shell"), "{path}");
+        }
+
+        for path in ["/robots.txt", "/sitemap.xml"] {
+            let response = app
+                .clone()
+                .oneshot(request("GET", path, None, ""))
+                .await
+                .expect("crawler metadata response");
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
         }
 
         let response = app
@@ -1181,7 +1210,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hosted_mode_never_stores_or_connects_obs_credentials() {
+    async fn hosted_mode_never_stores_workspace_data_or_connects_obs() {
         let state = test_state_for(DeploymentMode::Hosted).await;
         let app = api_router(state.clone()).with_state(state);
         let key = "h".repeat(43);
@@ -1206,6 +1235,25 @@ mod tests {
                 "/settings",
                 r#"{"obs_host":"127.0.0.1","obs_port":4455,"obs_password":"never-save-this"}"#,
             ),
+            (
+                "PUT",
+                "/checklist",
+                r#"[{"id":"must-not-persist","text":"Do not send this to a hosted container","done":true}]"#,
+            ),
+            ("GET", "/checklist", ""),
+            (
+                "PUT",
+                "/cues",
+                r#"[{"id":"must-not-persist-cue","label":"Do not persist","scene_name":"Nope"}]"#,
+            ),
+            ("GET", "/cues", ""),
+            (
+                "PUT",
+                "/links",
+                r#"[{"id":"must-not-persist-link","label":"Do not persist","url":"https://example.com"}]"#,
+            ),
+            ("GET", "/links", ""),
+            ("GET", "/settings", ""),
             ("GET", "/obs/status", ""),
             ("POST", "/obs/scene", r#"{"scene_name":"Live"}"#),
         ] {
@@ -1222,22 +1270,7 @@ mod tests {
                     .to_vec(),
             )
             .expect("utf8");
-            assert!(text.contains("local Stream Access Cues service"));
+            assert!(text.contains("hosted guide") || text.contains("local Stream Access Cues service"));
         }
-
-        let response = app
-            .oneshot(request("GET", "/settings", Some(&key), ""))
-            .await
-            .expect("settings response");
-        assert_eq!(response.status(), StatusCode::OK);
-        let text = String::from_utf8(
-            to_bytes(response.into_body(), 1024 * 1024)
-                .await
-                .expect("settings body")
-                .to_vec(),
-        )
-        .expect("utf8");
-        assert!(text.contains("\"configured\":false"));
-        assert!(!text.contains("never-save-this"));
     }
 }

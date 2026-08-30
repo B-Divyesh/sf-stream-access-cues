@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://stream-access-cues.sociobot.in/sitemap.xml

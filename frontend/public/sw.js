@@ -1,6 +1,6 @@
 const release = new URL(self.location.href).searchParams.get('build') || 'unversioned-build';
 const CACHE = `stream-access-cues-${release}`;
-const SHELL = ['/', '/index.html', '/icon.svg', '/manifest.webmanifest'];
+const SHELL = ['/', '/demo', '/privacy', '/terms', '/index.html', '/icon.svg', '/manifest.webmanifest'];
 const removeStaleCaches = () => caches.keys().then((keys) => Promise.all(
   keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))
 ));

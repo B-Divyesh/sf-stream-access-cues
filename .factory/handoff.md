@@ -2,7 +2,7 @@
 
 ## Release status
 
-Ready to deploy from commit `2c98bee659aa7bb5cef6e703959203984be1b5ef` after the independent verification 4 blockers were repaired. The artifact remains one Rust/Axum container serving the Vite/Svelte frontend on `PORT` (default `8080`). The public deployment remains hosted-guide mode; local container mode remains the only mode that talks to OBS.
+Released after the independent verification 4 blockers were repaired. The deployed source revision is `c164b6d13f7d63d05f1259dba6cd0929c026bece` (application repair `2c98bee659aa7bb5cef6e703959203984be1b5ef`). The artifact remains one Rust/Axum container serving the Vite/Svelte frontend on `PORT` (default `8080`). The public deployment remains hosted-guide mode; local container mode remains the only mode that talks to OBS.
 
 ## Repairs
 
@@ -43,7 +43,19 @@ GET /sitemap.xml                             200
 PUT /api/checklist (valid operator key)      403 "The hosted guide does not store workspace data…"
 ```
 
-The smoke response also included `Cache-Control: no-store` for `/health`, CSP with `frame-ancestors 'none'`, HSTS, `nosniff`, `DENY`, `no-referrer`, COOP, CORP, and restrictive Permissions-Policy. Production image and live evidence will be appended after deployment.
+The smoke response also included `Cache-Control: no-store` for `/health`, CSP with `frame-ancestors 'none'`, HSTS, `nosniff`, `DENY`, `no-referrer`, COOP, CORP, and restrictive Permissions-Policy.
+
+## Deployment and live verification
+
+Deployed the pushed commit `c164b6d13f7d63d05f1259dba6cd0929c026bece` on 2026-08-30:
+
+- ACR run `ch1cn` built `sociobotregistry.azurecr.io/sf-stream-access-cues:c164b6d13f7d` from a 215 KB source tarball with `.git` excluded. Digest: `sha256:dc9fd9de95892d14f7cb91f39b7f918927480186d45f2d94fe9bc595c7f402d3`.
+- Container App `sf-stream-access-cues` in resource group `sociobot` made revision `sf-stream-access-cues--0000008` ready with 100% latest-revision traffic. The existing three-replica ceiling remains safe because public workspace state is browser-local.
+- Live `https://stream-access-cues.sociobot.in/health` returned the exact deployed build SHA. Live `/robots.txt` and `/sitemap.xml` returned `200`. A valid-key live `PUT /api/checklist` returned `403` with the hosted-browser-storage explanation.
+- A fresh live browser context checked the first checklist item, reloaded, and observed it still checked; a following direct public API write was rejected with `403`. This reproduces the former persistence path with the corrected boundary.
+- Live Chromium desktop and 390×844 checks found one h1 and one main, the expected title, same-origin-only requests, zero page errors, zero Axe serious/critical findings, keyboard shortcut dialog/timer operation, and no mobile horizontal overflow (`390 == 390`). `/demo` showed the banner, reloaded offline after first load, and an update worker took control with exactly `stream-access-cues-live-repair-5` in Cache Storage.
+- Live response policy: root and service worker `no-cache`; hashed JavaScript `public, max-age=31536000, immutable`; health/API `no-store`; CSP, HSTS, `nosniff`, and no-referrer headers were present. A 500-request concurrent `/api/runtime` burst observed 322 `200` and 178 `429` responses across the scaled service.
+- Lighthouse (mobile defaults, Playwright Chromium, live root): Performance **97**, Accessibility **100**, Best Practices **100**, SEO **100**.
 
 ## Run and verify
 

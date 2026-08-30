@@ -41,6 +41,15 @@ The browser suite includes Axe checks in desktop and 390 px contexts with no ser
 
 ## Deployment and known limits
 
-Deploy the committed repair with the immutable commit supplied as `BUILD_SHA`, using image `sociobotregistry.azurecr.io/sf-stream-access-cues:<short-sha>` and Container App `sf-stream-access-cues` in resource group `sociobot`. Its only runtime environment variable remains `PORT=8080`; the Docker image’s hosted default keeps public OBS control disabled.
+Deployed on 2026-08-30 from repair commit `c62a31b64ccc73b92942ce8cebcb3d619ae93369`:
+
+- ACR run `ch1ae` built `sociobotregistry.azurecr.io/sf-stream-access-cues:c62a31b64ccc` (digest `sha256:6eabb96eeca232fd2e6bc929eb2ea591e4327763c8af98bef07ddbd86ec39b5a`) from the source tarball without `.git`.
+- Container App `sf-stream-access-cues` in resource group `sociobot` created healthy revision `sf-stream-access-cues--0000006`, with 100% latest-revision traffic.
+- Live `https://stream-access-cues.sociobot.in/health` returned `{"status":"ok","build_sha":"c62a31b64ccc73b92942ce8cebcb3d619ae93369"}`.
+- A live 220-request anonymous `/api/runtime` burst returned 155 × `200` and 65 × `429`; the immediate follow-up response was `429 Too Many Requests` with `Retry-After: 1` and `Cache-Control: no-store`.
+- Live `/privacy` and `/terms` returned `200`, and an uncached Playwright pass found one h1 and zero console/page errors on each. Live desktop and 390 px had zero Axe serious/critical issues, zero undersized repaired targets, and no horizontal overflow.
+- Live privacy/offline/update pass: initial browser requests used only `https://stream-access-cues.sociobot.in`; an isolated fresh context reloaded the cached shell offline with one h1, and a new service worker took control with exactly one versioned cache.
+
+The app has only `PORT=8080` at runtime; the Docker image’s hosted default keeps public OBS control disabled.
 
 Docker-compatible tooling is not installed in this worker, so the Dockerfile was checked through its dedicated source/build-identity regression and independent Vite/Rust production builds rather than a local image run. No Windows/NVDA or physical OBS installation is available here; the existing protocol-level OBS and keyboard coverage remains the automated acceptance evidence. No new product behavior is intentionally deferred.
